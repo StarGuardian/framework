@@ -506,17 +506,4 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] extends GenericMetaRecord[Bas
   def createWithMutableField[FieldType](original: BaseRecord,
                                         field: Field[FieldType, BaseRecord],
                                         newValue: Box[FieldType]): BaseRecord = createWithMutableGenericField(original, field, newValue)
-    /*{
-    val rec = createRecord
-
-    for (fh <- fieldList) {
-      val recField = fh.field(rec)
-      if (fh.name == field.name)
-        recField.asInstanceOf[Field[FieldType, BaseRecord]].setBox(newValue)
-      else
-        recField.setFromAny(fh.field(original).valueBox)
-    }
-
-    rec
-  }  */
 }
