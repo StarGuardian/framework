@@ -37,11 +37,29 @@ import Helpers._
 /**
  * Holds meta information and operations on a record
  */
-trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
+trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], FieldType <: GenericField[_, BaseRecord]] {  
   self: BaseRecord =>
 
-  private var fieldList: List[FieldHolder] = Nil
-  private var fieldMap: Map[String, FieldHolder] = Map.empty
+  def fieldControl: FieldControl[FieldType]  
+    
+  class FieldControl[FieldType <: BaseField : ClassManifest] {
+    def introspectField(rec: BaseRecord, method: Method)(f: (Method, FieldType) => Any) {
+      method.invoke(rec) match {
+        case mf: FieldType if !mf.ignoreField_? =>
+          mf.setName_!(method.getName)
+          f(method, mf)
+        case _ =>
+      }      
+    }
+    
+    def isField(m: Method) = {
+      val ret = !m.isSynthetic && manifest.erasure.isAssignableFrom(m.getReturnType)
+      ret      
+    }
+  }    
+    
+  private var fieldList: List[FieldHolder[FieldType]] = Nil
+  private var fieldMap: Map[String, FieldHolder[FieldType]] = Map.empty
 
   private var lifecycleCallbacks: List[(String, Method)] = Nil
 
@@ -99,12 +117,9 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
 
   private def isLifecycle(m: Method) = classOf[LifecycleCallbacks].isAssignableFrom(m.getReturnType)
 
-  private def isField(m: Method) = {
-    val ret = !m.isSynthetic && classOf[Field[_, _]].isAssignableFrom(m.getReturnType)
-    ret
-  }
+  private def isField(m: Method) = fieldControl.isField(m)
 
-  def introspect(rec: BaseRecord, methods: Array[Method])(f: (Method, Field[_, BaseRecord]) => Any): Unit = {
+  def introspect(rec: BaseRecord, methods: Array[Method])(f: (Method, FieldType) => Any): Unit = {
 
     // find all the potential fields
     val potentialFields = methods.toList.filter(isField)
@@ -121,18 +136,13 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
     }).map(_.head)
 
     for (v <- realMeth) {
-      v.invoke(rec) match {
-        case mf: Field[_, BaseRecord] if !mf.ignoreField_? =>
-          mf.setName_!(v.getName)
-          f(v, mf)
-        case _ =>
-      }
+    	fieldControl.introspectField(rec, v)(f)
     }
 
   }
 
   this.runSafe {
-    val tArray = new ListBuffer[FieldHolder]
+    val tArray = new ListBuffer[FieldHolder[FieldType]]
 
     val methods = rootClass.getMethods
 
@@ -169,30 +179,6 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
 
   /** Make a new record instance. This method can be overridden to provide caching behavior or what have you. */
   protected def instantiateRecord: BaseRecord = rootClass.newInstance.asInstanceOf[BaseRecord]
-
-  /**
-   * Creates a new record, setting the value of the fields from the original object but
-   * applying the new value for the specific field
-   *
-   * @param - original the initial record
-   * @param - field the new mutated field
-   * @param - the new value of the field
-   */
-  def createWithMutableField[FieldType](original: BaseRecord,
-                                        field: Field[FieldType, BaseRecord],
-                                        newValue: Box[FieldType]): BaseRecord = {
-    val rec = createRecord
-
-    for (fh <- fieldList) {
-      val recField = fh.field(rec)
-      if (fh.name == field.name)
-        recField.asInstanceOf[Field[FieldType, BaseRecord]].setBox(newValue)
-      else
-        recField.setFromAny(fh.field(original).valueBox)
-    }
-
-    rec
-  }
 
   /**
    * Returns the HTML representation of inst Record.
@@ -379,7 +365,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    *
    * @return Box[The Field] (Empty if the field is not found)
    */
-  def fieldByName(fieldName: String, inst: BaseRecord): Box[Field[_, BaseRecord]] = {
+  def fieldByName(fieldName: String, inst: BaseRecord): Box[FieldType] = {
     Box(fieldMap.get(fieldName).map(_.field(inst)))
   }
 
@@ -455,6 +441,21 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
     }
   }
 
+  def createWithMutableGenericField[ValueType, FieldType <: GenericField[ValueType, BaseRecord]](original: BaseRecord,
+                                        field: FieldType,
+                                        newValue: Box[ValueType]): BaseRecord = {
+    val rec = createRecord
+
+    for (fh <- fieldList) {
+      val recField = fh.field(rec)
+      if (fh.name == field.name)
+        recField.asInstanceOf[GenericField[ValueType, BaseRecord]].setBox(newValue)
+      else
+        recField.setFromAny(fh.field(original).valueBox)
+    }
+    rec
+  }   
+  
   def copy(rec: BaseRecord): BaseRecord = {
     val inst = createRecord
     setFieldsFromRecord(inst, rec)
@@ -466,7 +467,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    *
    * @return a List of Field
    */
-  def fieldOrder: List[Field[_, BaseRecord]] = Nil
+  def fieldOrder: List[FieldType] = Nil
 
   /**
    * Renamed from fields() due to a clash with fields() in Record. Use this method
@@ -475,17 +476,47 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    *
    * @see Record
    */
-  def metaFields() : List[Field[_, BaseRecord]] = fieldList.map(_.metaField)
+  def metaFields() : List[FieldType] = fieldList.map(_.metaField)
 
   /**
    * Obtain the fields for a particular Record or subclass instance by passing
    * the instance itself.
    * (added 14th August 2009, Tim Perrett)
    */
-  def fields(rec: BaseRecord) : List[Field[_, BaseRecord]] = fieldList.map(_.field(rec))
+  def fields(rec: BaseRecord) : List[FieldType] = fieldList.map(_.field(rec))
 
-  case class FieldHolder(name: String, method: Method, metaField: Field[_, BaseRecord]) {
-    def field(inst: BaseRecord): Field[_, BaseRecord] = method.invoke(inst).asInstanceOf[Field[_, BaseRecord]]
+  case class FieldHolder[FieldType](name: String, method: Method, metaField: FieldType) {
+    def field(inst: BaseRecord): FieldType = method.invoke(inst).asInstanceOf[FieldType]
   }
 }
 
+trait MetaRecord[BaseRecord <: Record[BaseRecord]] extends GenericMetaRecord[BaseRecord, Field[_, BaseRecord]] {
+  self: MetaRecord[BaseRecord] with BaseRecord =>
+    
+  def fieldControl = new FieldControl[Field[_, BaseRecord]]
+  
+  /**
+   * Creates a new record, setting the value of the fields from the original object but
+   * applying the new value for the specific field
+   *
+   * @param - original the initial record
+   * @param - field the new mutated field
+   * @param - the new value of the field
+   */
+  def createWithMutableField[FieldType](original: BaseRecord,
+                                        field: Field[FieldType, BaseRecord],
+                                        newValue: Box[FieldType]): BaseRecord = createWithMutableGenericField(original, field, newValue)
+    /*{
+    val rec = createRecord
+
+    for (fh <- fieldList) {
+      val recField = fh.field(rec)
+      if (fh.name == field.name)
+        recField.asInstanceOf[Field[FieldType, BaseRecord]].setBox(newValue)
+      else
+        recField.setFromAny(fh.field(original).valueBox)
+    }
+
+    rec
+  }  */
+}

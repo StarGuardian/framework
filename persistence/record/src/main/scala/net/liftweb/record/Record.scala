@@ -23,11 +23,12 @@ import http.{Req, SHtml}
 import json.JsonAST._
 import util._
 import field._
-
 import scala.xml._
 import java.util.prefs.BackingStoreException
+import net.liftweb.common.Box
+import net.liftweb.json.JObject
 
-trait Record[MyType <: Record[MyType]] extends FieldContainer {
+trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: GenericField[_, MyType]] extends FieldContainer {
   self: MyType =>
 
   /**
@@ -40,7 +41,7 @@ trait Record[MyType <: Record[MyType]] extends FieldContainer {
   /**
    * The meta record (the object that contains the meta result for this type)
    */
-  def meta: MetaRecord[MyType]
+  def meta: GenericMetaRecord[MyType, FieldType]
 
   /**
    * Is it safe to make changes to the record (or should we check access control?)
@@ -140,11 +141,11 @@ trait Record[MyType <: Record[MyType]] extends FieldContainer {
    *
    * @return Box[MappedField]
    */
-  def fieldByName(fieldName: String): Box[Field[_, MyType]] = meta.fieldByName(fieldName, this)
+  def fieldByName(fieldName: String): Box[FieldType] = meta.fieldByName(fieldName, this)
 
   override def equals(other: Any): Boolean = {
     other match {
-      case that: Record[MyType] =>
+      case that: GenericRecord[MyType, FieldType] =>
         that.fields.corresponds(this.fields) { (a,b) =>
           a.name == b.name && a.valueBox == b.valueBox
         }
@@ -165,6 +166,12 @@ trait Record[MyType <: Record[MyType]] extends FieldContainer {
   }
 
   def copy: MyType = meta.copy(this)
+}
+
+trait Record[MyType <: Record[MyType]] extends GenericRecord[MyType, Field[_, MyType]] {
+  self: MyType =>
+    
+  def meta: MetaRecord[MyType]
 }
 
 trait ExpandoRecord[MyType <: Record[MyType] with ExpandoRecord[MyType]] {

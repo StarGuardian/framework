@@ -142,7 +142,7 @@ trait BaseField extends FieldIdentifier with util.BaseField {
 }
 
 /** Refined trait for fields owned by a particular record type */
-trait OwnedField[OwnerType <: Record[OwnerType]] extends BaseField {
+trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _]] extends BaseField {
   /**
    * Return the owner of this field
    */
@@ -153,6 +153,8 @@ trait OwnedField[OwnerType <: Record[OwnerType]] extends BaseField {
    */
   override final def safe_? : Boolean = owner.safe_?
 }
+
+trait OwnedField[OwnerType <: Record[OwnerType]] extends GenericOwnedField[OwnerType]
 
 /** Refined trait for fields holding a particular value type */
 trait TypedField[ThisType] extends BaseField {
@@ -437,7 +439,7 @@ trait OptionalTypedField[ThisType] extends TypedField[ThisType] with Product1[Bo
 /**
  * A simple field that can store and retrieve a value of a given type
  */
-trait Field[ThisType, OwnerType <: Record[OwnerType]] extends OwnedField[OwnerType] with TypedField[ThisType] {
+trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _]] extends GenericOwnedField[OwnerType] with TypedField[ThisType] {
 
   def apply(in: MyType): OwnerType = apply(Full(in))
 
@@ -445,8 +447,12 @@ trait Field[ThisType, OwnerType <: Record[OwnerType]] extends OwnedField[OwnerTy
     this.setBox(in)
     owner
   } else {
-    owner.meta.createWithMutableField(owner, this, in)
-  }
+    owner.meta.createWithMutableGenericField(owner, this, in)
+  }  
+}
+
+trait Field[ThisType, OwnerType <: Record[OwnerType]] extends GenericField[ThisType, OwnerType] with OwnedField[OwnerType] {
+
 }
 
 /**
