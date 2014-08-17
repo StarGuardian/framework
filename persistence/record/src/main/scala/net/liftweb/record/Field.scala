@@ -25,8 +25,7 @@ import scala.reflect.Manifest
 import scala.xml._
 import http.SHtml
 
-/** Base trait of record fields, with functionality common to any type of field owned by any type of record */
-trait BaseField extends FieldIdentifier with util.BaseField {
+trait AbstractField extends FieldIdentifier with util.BaseField {
   private[record] var fieldName: String = _
   private[record] var dirty = false
 
@@ -91,14 +90,6 @@ trait BaseField extends FieldIdentifier with util.BaseField {
   def toForm: Box[NodeSeq]
 
   /**
-   * Returns the field's value as a valid JavaScript expression
-   */
-  def asJs: JsExp
-
-  /** Encode the field value into a JValue */
-  def asJValue: JValue
-
-  /**
    * What form elements are we going to add to this field?
    */
   def formElemAttrs: Seq[SHtml.ElemAttr] = Nil
@@ -138,46 +129,22 @@ trait BaseField extends FieldIdentifier with util.BaseField {
 
   def asString: String
 
-  def safe_? : Boolean = true // let owned fields make it unsafe some times
+  def safe_? : Boolean = true // let owned fields make it unsafe some times  
 }
 
-/** Refined trait for fields owned by a particular record type */
-trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _]] extends BaseField {
+trait JsonReadable {  
   /**
-   * Return the owner of this field
+   * Returns the field's value as a valid JavaScript expression
    */
-  def owner: OwnerType
+  def asJs: JsExp
 
-  /**
-   * Are we in "safe" mode (i.e., the value of the field can be read or written without any security checks.)
-   */
-  override final def safe_? : Boolean = owner.safe_?
+  /** Encode the field value into a JValue */
+  def asJValue: JValue  
 }
 
-trait OwnedField[OwnerType <: Record[OwnerType]] extends GenericOwnedField[OwnerType]
-
-/** Refined trait for fields holding a particular value type */
-trait TypedField[ThisType] extends BaseField {
-
-  /*
-   * Unless overridden, MyType is equal to ThisType.  Available for
-   * backwards compatibility
-   */
-  type MyType = ThisType // For backwards compatibility
-
-  type ValidationFunction = ValueType => List[FieldError]
-
-  private[record] var data: Box[MyType] = Empty
-  private[record] var needsDefault: Boolean = true
-
-  /**
-   * Helper for implementing asJValue for a conversion to an encoded JString
-   *
-   * @param encode function to transform the field value into a String
-   */
-  protected def asJString(encode: MyType => String): JValue =
-    valueBox.map(v => JString(encode(v))) openOr (JNothing: JValue)
-
+trait JsonSupport[DataType] extends JsonReadable {
+  self: AbstractTypedField[DataType] =>
+  
   /** Decode the JValue and set the field to the decoded value. Returns Empty or Failure if the value could not be set */
   def setFromJValue(jvalue: JValue): Box[MyType]
 
@@ -190,7 +157,49 @@ trait TypedField[ThisType] extends BaseField {
     case JNothing|JNull if optional_? => setBox(Empty)
     case JString(s)                   => setBox(decode(s))
     case other                        => setBox(FieldHelpers.expectedA("JString", other))
-  }
+  } 
+  
+  /**
+   * Helper for implementing asJValue for a conversion to an encoded JString
+   *
+   * @param encode function to transform the field value into a String
+   */
+  protected def asJString(encode: MyType => String): JValue =
+    valueBox.map(v => JString(encode(v))) openOr (JNothing: JValue)  
+}
+
+/** Base trait of record fields, with functionality common to any type of field owned by any type of record */
+trait BaseField extends AbstractField with JsonReadable {
+
+}
+
+/** Refined trait for fields owned by a particular record type */
+trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _, _]] extends AbstractField {
+  /**
+   * Return the owner of this field
+   */
+  def owner: OwnerType
+
+  /**
+   * Are we in "safe" mode (i.e., the value of the field can be read or written without any security checks.)
+   */
+  override final def safe_? : Boolean = owner.safe_?
+}
+
+trait OwnedField[OwnerType <: Record[OwnerType]] extends GenericOwnedField[OwnerType] with BaseField
+
+trait AbstractTypedField[ThisType] extends AbstractField {
+
+  /*
+   * Unless overridden, MyType is equal to ThisType.  Available for
+   * backwards compatibility
+   */
+  type MyType = ThisType // For backwards compatibility
+
+  type ValidationFunction = ValueType => List[FieldError]
+
+  private[record] var data: Box[MyType] = Empty
+  private[record] var needsDefault: Boolean = true
 
   def validations: List[ValidationFunction] = Nil
 
@@ -340,6 +349,9 @@ trait TypedField[ThisType] extends BaseField {
   }
 }
 
+/** Refined trait for fields holding a particular value type */
+trait TypedField[ThisType] extends BaseField with AbstractTypedField[ThisType] with JsonSupport[ThisType]
+
 trait MandatoryTypedField[ThisType] extends TypedField[ThisType] with Product1[ThisType] {
 
   /**
@@ -439,7 +451,7 @@ trait OptionalTypedField[ThisType] extends TypedField[ThisType] with Product1[Bo
 /**
  * A simple field that can store and retrieve a value of a given type
  */
-trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _]] extends GenericOwnedField[OwnerType] with TypedField[ThisType] {
+trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _, MetaType], MetaType <: GenericMetaRecord[OwnerType, _, MetaType]] extends GenericOwnedField[OwnerType] with AbstractTypedField[ThisType] {
 
   def apply(in: MyType): OwnerType = apply(Full(in))
 
@@ -451,7 +463,7 @@ trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _]] extends G
   }  
 }
 
-trait Field[ThisType, OwnerType <: Record[OwnerType]] extends GenericField[ThisType, OwnerType] with OwnedField[OwnerType] {
+trait Field[ThisType, OwnerType <: Record[OwnerType]] extends GenericField[ThisType, OwnerType, MetaRecord[OwnerType]] with OwnedField[OwnerType] with TypedField[ThisType] {
 
 }
 

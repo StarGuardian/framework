@@ -28,7 +28,43 @@ import java.util.prefs.BackingStoreException
 import net.liftweb.common.Box
 import net.liftweb.json.JObject
 
-trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: GenericField[_, MyType]] extends FieldContainer {
+trait JsonRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] with JsonRec[BaseRecord, FieldType, MetaType], 
+  FieldType <: GenericField[_, BaseRecord, MetaType] with JsonSupport[_], MetaType <: GenericMetaRecord[BaseRecord, FieldType, MetaType] with JsonMetaRec[BaseRecord, FieldType, MetaType]] {
+  
+  self: BaseRecord =>
+    
+  /**
+   * Returns the JSON representation of this record
+   *
+   * @return a JsObj
+   */
+  def asJSON: JsExp = meta.asJSON(this)  
+  
+  /**
+   * Returns the JSON representation of this record, converts asJValue to JsObj
+   *
+   * @return a JsObj
+   */
+  def asJsExp: JsExp = meta.asJsExp(this)  
+  
+  /** Encode this record instance as a JObject */
+  def asJValue: JObject = meta.asJValue(this) 
+  
+  /**
+   * Sets the fields of this Record from the given JSON.
+   */
+  def setFieldsFromJSON(json: String): Box[Unit] = meta.setFieldsFromJSON(this, json)
+
+  /** Set the fields of this record from the given JValue */
+  def setFieldsFromJValue(jvalue: JValue): Box[Unit] = meta.setFieldsFromJValue(this, jvalue)
+
+  /**
+   * Sets the fields of this Record from the given JSON.
+   */
+  def setFieldsFromJsonString(json: String): Box[Unit] = meta.setFieldsFromJsonString(this, json)  
+}
+
+trait GenericRecord[MyType <: GenericRecord[MyType, FieldType, MetaType], FieldType <: GenericField[_, MyType, MetaType], MetaType <: GenericMetaRecord[MyType, FieldType, MetaType]] extends FieldContainer {
   self: MyType =>
 
   /**
@@ -41,7 +77,7 @@ trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: Gen
   /**
    * The meta record (the object that contains the meta result for this type)
    */
-  def meta: GenericMetaRecord[MyType, FieldType]
+  def meta: MetaType
 
   /**
    * Is it safe to make changes to the record (or should we check access control?)
@@ -72,40 +108,10 @@ trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: Gen
     }
   }
 
-  /**
-   * Returns the JSON representation of this record
-   *
-   * @return a JsObj
-   */
-  def asJSON: JsExp = meta.asJSON(this)
-
  /**
   * Save the instance and return the instance
   */
   def saveTheRecord(): Box[MyType] = throw new BackingStoreException("Raw Records don't save themselves")
-
-  /**
-   * Returns the JSON representation of this record, converts asJValue to JsObj
-   *
-   * @return a JsObj
-   */
-  def asJsExp: JsExp = meta.asJsExp(this)
-
-  /**
-   * Sets the fields of this Record from the given JSON.
-   */
-  def setFieldsFromJSON(json: String): Box[Unit] = meta.setFieldsFromJSON(this, json)
-
-  /** Encode this record instance as a JObject */
-  def asJValue: JObject = meta.asJValue(this)
-
-  /** Set the fields of this record from the given JValue */
-  def setFieldsFromJValue(jvalue: JValue): Box[Unit] = meta.setFieldsFromJValue(this, jvalue)
-
-  /**
-   * Sets the fields of this Record from the given JSON.
-   */
-  def setFieldsFromJsonString(json: String): Box[Unit] = meta.setFieldsFromJsonString(this, json)
 
   /**
    * Sets the fields of this Record from the given Req.
@@ -145,7 +151,7 @@ trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: Gen
 
   override def equals(other: Any): Boolean = {
     other match {
-      case that: GenericRecord[MyType, FieldType] =>
+      case that: GenericRecord[MyType, FieldType, MetaType] =>
         that.fields.corresponds(this.fields) { (a,b) =>
           a.name == b.name && a.valueBox == b.valueBox
         }
@@ -168,10 +174,8 @@ trait GenericRecord[MyType <: GenericRecord[MyType, FieldType], FieldType <: Gen
   def copy: MyType = meta.copy(this)
 }
 
-trait Record[MyType <: Record[MyType]] extends GenericRecord[MyType, Field[_, MyType]] {
+trait Record[MyType <: Record[MyType]] extends GenericRecord[MyType, Field[_, MyType], MetaRecord[MyType]] with JsonRec[MyType, Field[_, MyType], MetaRecord[MyType]]{
   self: MyType =>
-    
-  def meta: MetaRecord[MyType]
 }
 
 trait ExpandoRecord[MyType <: Record[MyType] with ExpandoRecord[MyType]] {

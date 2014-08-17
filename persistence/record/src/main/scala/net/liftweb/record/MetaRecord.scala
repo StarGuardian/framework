@@ -34,15 +34,116 @@ import Box._
 import JE._
 import Helpers._
 
+trait JsonMetaRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] with JsonRec[BaseRecord, FieldType, MetaType], 
+  FieldType <: GenericField[_, BaseRecord, MetaType] with JsonSupport[_], MetaType <: GenericMetaRecord[BaseRecord, FieldType, MetaType] with JsonMetaRec[BaseRecord, FieldType, MetaType]] {
+
+  self: MetaType =>
+  /**
+   * Returns the JSON representation of <i>inst</i> record
+   *
+   * @param inst: BaseRecord
+   * @return JsObj
+   */
+  def asJSON(inst: BaseRecord): JsObj = {
+    val tups = inst.fields.map{ field =>
+      field.name -> field.asJs
+    }
+    JsObj(tups:_*)
+  }
+
+  /**
+   * Returns the JSON representation of <i>inst</i> record, converts asJValue to JsObj
+   *
+   * @return a JsObj
+   */
+  def asJsExp(inst: BaseRecord): JsExp = new JsExp {
+    lazy val toJsCmd = Printer.compact(render(asJValue(inst)))
+  }
+
+  /**
+   * Create a record with fields populated with values from the JSON construct
+   *
+   * @param json - The stringified JSON object
+   * @return Box[BaseRecord]
+   */
+  def fromJSON(json: String): Box[BaseRecord] = {
+    val inst = createRecord
+    setFieldsFromJSON(inst, json) map (_ => inst)
+  }
+
+  /**
+   * Populate the fields of the record instance with values from the JSON construct
+   *
+   * @param inst - The record to populate
+   * @param json - The stringified JSON object
+   * @return - Full(()) on success, other on failure
+   */
+  def setFieldsFromJSON(inst: BaseRecord, json: String): Box[Unit] =
+    JSONParser.parse(json) match {
+      case Full(nvp : Map[_, _]) =>
+        for ((k, v) <- nvp;
+             field <- inst.fieldByName(k.toString)) yield field.setFromAny(v)
+        Full(inst)
+      case Full(_) => Empty
+      case failure => failure.asA[Unit]
+    }
+
+  /** Encode a record instance into a JValue */
+  def asJValue(rec: BaseRecord): JObject = {
+    JObject(fields(rec).map(f => JField(f.name, f.asJValue)))
+  }
+
+  /** Create a record by decoding a JValue which must be a JObject */
+  def fromJValue(jvalue: JValue): Box[BaseRecord] = {
+    val inst = createRecord
+    setFieldsFromJValue(inst, jvalue) map (_ => inst)
+  }
+
+  /** Attempt to decode a JValue, which must be a JObject, into a record instance */
+  def setFieldsFromJValue(rec: BaseRecord, jvalue: JValue): Box[Unit] = {
+    def fromJFields(jfields: List[JField]): Box[Unit] = {
+      for {
+        jfield <- jfields
+        field <- rec.fieldByName(jfield.name)
+      } field.setFromJValue(jfield.value)
+
+      Full(())
+    }
+
+    jvalue match {
+      case JObject(jfields) => fromJFields(jfields)
+      case other => expectedA("JObject", other)
+    }
+  }
+
+  /**
+   * Create a record with fields populated with values from the JSON construct
+   *
+   * @param json - The stringified JSON object
+   * @return Box[BaseRecord]
+   */
+  def fromJsonString(json: String): Box[BaseRecord] = {
+    val inst = createRecord
+    setFieldsFromJsonString(inst, json) map (_ => inst)
+  }
+
+  /**
+   * Set from a Json String using the lift-json parser
+   */
+  def setFieldsFromJsonString(inst: BaseRecord, json: String): Box[Unit] =
+    setFieldsFromJValue(inst, JsonParser.parse(json))  
+}
+
 /**
  * Holds meta information and operations on a record
  */
-trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], FieldType <: GenericField[_, BaseRecord]] {  
+trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType], 
+  FieldType <: GenericField[_, BaseRecord, MetaType], MetaType <: GenericMetaRecord[BaseRecord, FieldType, MetaType]] {  
   self: BaseRecord =>
 
   def fieldControl: FieldControl[FieldType]  
     
-  class FieldControl[FieldType <: BaseField : ClassManifest] {
+  class FieldControl[FieldType <: AbstractField : ClassManifest] {
     def introspectField(rec: BaseRecord, method: Method)(f: (Method, FieldType) => Any) {
       method.invoke(rec) match {
         case mf: FieldType if !mf.ignoreField_? =>
@@ -204,102 +305,6 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], Fiel
     }
   }
 
-  /**
-   * Returns the JSON representation of <i>inst</i> record
-   *
-   * @param inst: BaseRecord
-   * @return JsObj
-   */
-  def asJSON(inst: BaseRecord): JsObj = {
-    val tups = fieldList.map{ fh =>
-      val field = fh.field(inst)
-      field.name -> field.asJs
-    }
-    JsObj(tups:_*)
-  }
-
-  /**
-   * Returns the JSON representation of <i>inst</i> record, converts asJValue to JsObj
-   *
-   * @return a JsObj
-   */
-  def asJsExp(inst: BaseRecord): JsExp = new JsExp {
-    lazy val toJsCmd = Printer.compact(render(asJValue(inst)))
-  }
-
-  /**
-   * Create a record with fields populated with values from the JSON construct
-   *
-   * @param json - The stringified JSON object
-   * @return Box[BaseRecord]
-   */
-  def fromJSON(json: String): Box[BaseRecord] = {
-    val inst = createRecord
-    setFieldsFromJSON(inst, json) map (_ => inst)
-  }
-
-  /**
-   * Populate the fields of the record instance with values from the JSON construct
-   *
-   * @param inst - The record to populate
-   * @param json - The stringified JSON object
-   * @return - Full(()) on success, other on failure
-   */
-  def setFieldsFromJSON(inst: BaseRecord, json: String): Box[Unit] =
-    JSONParser.parse(json) match {
-      case Full(nvp : Map[_, _]) =>
-        for ((k, v) <- nvp;
-             field <- inst.fieldByName(k.toString)) yield field.setFromAny(v)
-        Full(inst)
-      case Full(_) => Empty
-      case failure => failure.asA[Unit]
-    }
-
-  /** Encode a record instance into a JValue */
-  def asJValue(rec: BaseRecord): JObject = {
-    JObject(fields(rec).map(f => JField(f.name, f.asJValue)))
-  }
-
-  /** Create a record by decoding a JValue which must be a JObject */
-  def fromJValue(jvalue: JValue): Box[BaseRecord] = {
-    val inst = createRecord
-    setFieldsFromJValue(inst, jvalue) map (_ => inst)
-  }
-
-  /** Attempt to decode a JValue, which must be a JObject, into a record instance */
-  def setFieldsFromJValue(rec: BaseRecord, jvalue: JValue): Box[Unit] = {
-    def fromJFields(jfields: List[JField]): Box[Unit] = {
-      for {
-        jfield <- jfields
-        field <- rec.fieldByName(jfield.name)
-      } field.setFromJValue(jfield.value)
-
-      Full(())
-    }
-
-    jvalue match {
-      case JObject(jfields) => fromJFields(jfields)
-      case other => expectedA("JObject", other)
-    }
-  }
-
-  /**
-   * Create a record with fields populated with values from the JSON construct
-   *
-   * @param json - The stringified JSON object
-   * @return Box[BaseRecord]
-   */
-  def fromJsonString(json: String): Box[BaseRecord] = {
-    val inst = createRecord
-    setFieldsFromJsonString(inst, json) map (_ => inst)
-  }
-
-  /**
-   * Set from a Json String using the lift-json parser
-   */
-  def setFieldsFromJsonString(inst: BaseRecord, json: String): Box[Unit] =
-    setFieldsFromJValue(inst, JsonParser.parse(json))
-
   def foreachCallback(inst: BaseRecord, f: LifecycleCallbacks => Any) {
     lifecycleCallbacks.foreach(m => f(m._2.invoke(inst).asInstanceOf[LifecycleCallbacks]))
   }
@@ -441,7 +446,7 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], Fiel
     }
   }
 
-  def createWithMutableGenericField[ValueType, FieldType <: GenericField[ValueType, BaseRecord]](original: BaseRecord,
+  def createWithMutableGenericField[ValueType, FieldType <: GenericField[ValueType, BaseRecord, MetaType]](original: BaseRecord,
                                         field: FieldType,
                                         newValue: Box[ValueType]): BaseRecord = {
     val rec = createRecord
@@ -449,7 +454,7 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], Fiel
     for (fh <- fieldList) {
       val recField = fh.field(rec)
       if (fh.name == field.name)
-        recField.asInstanceOf[GenericField[ValueType, BaseRecord]].setBox(newValue)
+        recField.asInstanceOf[GenericField[ValueType, BaseRecord, MetaType]].setBox(newValue)
       else
         recField.setFromAny(fh.field(original).valueBox)
     }
@@ -490,7 +495,7 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType], Fiel
   }
 }
 
-trait MetaRecord[BaseRecord <: Record[BaseRecord]] extends GenericMetaRecord[BaseRecord, Field[_, BaseRecord]] {
+trait MetaRecord[BaseRecord <: Record[BaseRecord]] extends GenericMetaRecord[BaseRecord, Field[_, BaseRecord], MetaRecord[BaseRecord]] with JsonMetaRec[BaseRecord, Field[_, BaseRecord], MetaRecord[BaseRecord]] {
   self: MetaRecord[BaseRecord] with BaseRecord =>
     
   def fieldControl = new FieldControl[Field[_, BaseRecord]]
