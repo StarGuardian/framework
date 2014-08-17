@@ -17,6 +17,8 @@
 package net.liftweb
 package record
 
+import scala.language.existentials
+
 import java.lang.reflect.Modifier
 import net.liftweb._
 import util._
@@ -25,8 +27,7 @@ import scala.collection.mutable.{ListBuffer}
 import scala.xml._
 import net.liftweb.http.js.{JsExp, JE, JsObj}
 import net.liftweb.http.{SHtml, Req, LiftResponse, LiftRules}
-import net.liftweb.json.{JsonParser, Printer}
-import net.liftweb.json.JsonAST._
+import net.liftweb.json._
 import net.liftweb.record.FieldHelpers.expectedA
 import java.lang.reflect.Method
 import field._
@@ -38,6 +39,7 @@ trait JsonMetaRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] w
   FieldType <: GenericField[_, BaseRecord, MetaType] with JsonSupport[_], MetaType <: GenericMetaRecord[BaseRecord, FieldType, MetaType] with JsonMetaRec[BaseRecord, FieldType, MetaType]] {
 
   self: MetaType =>
+    
   /**
    * Returns the JSON representation of <i>inst</i> record
    *
@@ -59,34 +61,6 @@ trait JsonMetaRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] w
   def asJsExp(inst: BaseRecord): JsExp = new JsExp {
     lazy val toJsCmd = Printer.compact(render(asJValue(inst)))
   }
-
-  /**
-   * Create a record with fields populated with values from the JSON construct
-   *
-   * @param json - The stringified JSON object
-   * @return Box[BaseRecord]
-   */
-  def fromJSON(json: String): Box[BaseRecord] = {
-    val inst = createRecord
-    setFieldsFromJSON(inst, json) map (_ => inst)
-  }
-
-  /**
-   * Populate the fields of the record instance with values from the JSON construct
-   *
-   * @param inst - The record to populate
-   * @param json - The stringified JSON object
-   * @return - Full(()) on success, other on failure
-   */
-  def setFieldsFromJSON(inst: BaseRecord, json: String): Box[Unit] =
-    JSONParser.parse(json) match {
-      case Full(nvp : Map[_, _]) =>
-        for ((k, v) <- nvp;
-             field <- inst.fieldByName(k.toString)) yield field.setFromAny(v)
-        Full(inst)
-      case Full(_) => Empty
-      case failure => failure.asA[Unit]
-    }
 
   /** Encode a record instance into a JValue */
   def asJValue(rec: BaseRecord): JObject = {
@@ -131,7 +105,7 @@ trait JsonMetaRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] w
    * Set from a Json String using the lift-json parser
    */
   def setFieldsFromJsonString(inst: BaseRecord, json: String): Box[Unit] =
-    setFieldsFromJValue(inst, JsonParser.parse(json))  
+    setFieldsFromJValue(inst, JsonParser.parse(json))
 }
 
 /**
@@ -154,7 +128,7 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaT
     }
     
     def isField(m: Method) = {
-      val ret = !m.isSynthetic && manifest.erasure.isAssignableFrom(m.getReturnType)
+      val ret = !m.isSynthetic && manifest.runtimeClass.isAssignableFrom(m.getReturnType)
       ret      
     }
   }    
@@ -163,6 +137,8 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaT
   private var fieldMap: Map[String, FieldHolder[FieldType]] = Map.empty
 
   private var lifecycleCallbacks: List[(String, Method)] = Nil
+
+  def connectionIdentifier: ConnectionIdentifier = DefaultConnectionIdentifier
 
   /**
    * Set this to use your own form template when rendering a Record to a form.
@@ -351,12 +327,13 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaT
           case _ => NodeSeq.Empty
         }
 
-      case Elem(namespace, label, attrs, scp, ns @ _*) =>
-        Elem(namespace, label, attrs, scp, toForm(inst, ns.flatMap(n => toForm(inst, n))):_* )
+      case elem: Elem =>
+        elem.copy(child = toForm(inst, elem.child.flatMap(n => toForm(inst, n))))
 
       case s : Seq[_] => s.flatMap(e => e match {
-            case Elem(namespace, label, attrs, scp, ns @ _*) =>
-              Elem(namespace, label, attrs, scp, toForm(inst, ns.flatMap(n => toForm(inst, n))):_* )
+            case elem: Elem =>
+              elem.copy(child = toForm(inst, elem.child.flatMap(n => toForm(inst, n))))
+
             case x => x
           })
 
@@ -493,6 +470,8 @@ trait GenericMetaRecord[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaT
   case class FieldHolder[FieldType](name: String, method: Method, metaField: FieldType) {
     def field(inst: BaseRecord): FieldType = method.invoke(inst).asInstanceOf[FieldType]
   }
+
+  def dirty_?(inst: BaseRecord): Boolean = !fields(inst).filter(_.dirty_?).isEmpty
 }
 
 trait MetaRecord[BaseRecord <: Record[BaseRecord]] extends GenericMetaRecord[BaseRecord, Field[_, BaseRecord], MetaRecord[BaseRecord]] with JsonMetaRec[BaseRecord, Field[_, BaseRecord], MetaRecord[BaseRecord]] {

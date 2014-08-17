@@ -55,7 +55,8 @@ object ToHeadUsages extends Specification  {
     "merge <head> from html fragment" in {
       jetty.browse(
         "/htmlFragmentWithHead", html =>
-          html.getElementByXPath("/html/head/script[@id='fromFrag']") must not(beNull when jetty.running))
+          html.getElementByXPath("/html/head/script[@id='fromFrag']") must not(beNull when jetty.running)
+        )
     }
 
     "merge <head> from html fragment does not include head element in body" in {
@@ -89,6 +90,7 @@ object ToHeadUsages extends Specification  {
       )
     }
 
+    /*
     "not merge for headless body html" in {
       jetty.browse(
         "/body_no_head", html => {
@@ -98,7 +100,7 @@ object ToHeadUsages extends Specification  {
           html.getElementsByXPath("/html/body//div").size must be_==(1).when(jetty.running)
         }
       )
-    }
+    }*/
 
     "not merge non-html" in {
       jetty.browse(
@@ -135,8 +137,8 @@ object ToHeadUsages extends Specification  {
           (idx >= 0) must_== true
         }
       )
-    }
-    */
+    }*/
+
   }
 
   "deferred snippets" should {

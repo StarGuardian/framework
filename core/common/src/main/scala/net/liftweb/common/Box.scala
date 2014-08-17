@@ -17,6 +17,8 @@
 package net.liftweb
 package common
 
+import scala.language.implicitConversions
+import scala.language.existentials
 import scala.reflect.Manifest
 
 import java.util.{Iterator => JavaIterator, ArrayList => JavaArrayList}
@@ -46,7 +48,43 @@ class BoxJBridge {
  *
  * It also provides implicit methods to transform Option to Box, Box to Iterable, and Box to Option
  */
-object Box extends BoxTrait
+object Box extends BoxTrait {
+  /**
+   * Helper class to provide an easy way for converting Lists of Boxes[T] into
+   * a Box of List[T].
+  **/
+  implicit class ListOfBoxes[T](val theListOfBoxes: List[Box[T]]) extends AnyVal {
+    /**
+     * Convert a List of Boxes into a single Box containting a List[T], where T is
+     * the parameterized type of the Boxes.
+     *
+     * This method is useful for those cases where you have a lot of operations being
+     * executed that all return some Box[T]. You want just a List[T] if all of those
+     * operations succeeded, but you don't want to have Failures disappear if any were
+     * present in the list.
+     *
+     * If all of the Boxes in the List are Full or Empty, we return a Full box containing
+     * a List of all of the Full Box values that were present. If any of the Boxes contain
+     * a Failure, a ParamFailure is returned, containing the original List[Box[T]] as the
+     * param.
+     *
+     * It is worth noting that the size of the list in the resulting Box[List[T]] may not be equal
+     * to the size of the List[Box[T]] that is fed as Empty values will disappear altogether in the
+     * conversion.
+     *
+     * @param failureErrorMessage The string that should be placed in the message for the Failure.
+     * @return A Full[List[T]] if no Failures were present. ParamFailure[List[Box[T]]] otherwise.
+    **/
+    def toSingleBox(failureErrorMessage: String): Box[List[T]] = {
+      if (theListOfBoxes.exists(_.isInstanceOf[Failure])) {
+        Failure(failureErrorMessage) ~> theListOfBoxes
+      } else {
+        Full(theListOfBoxes.flatten)
+      }
+    }
+  }
+
+}
 
 /**
  * The Box companion object provides methods to create a Box from:
@@ -97,17 +135,6 @@ sealed trait BoxTrait {
     case x :: _ => Full(x)
     case _ => Empty
   }
-
-  /**
-   * This method allows one to encapsulate any object in a Box in a null-safe manner,
-   * treating null values to Empty.  This is a parallel method to
-   * the Scala Option's apply method.  Note that the apply method is overloaded
-   * and it's much, much better to use legacyNullTest in this case.
-   * 
-   * @return <code>Full(in)</code> if <code>in</code> is not null; Empty otherwise
-   */
-  @deprecated("Use legacyNullTest", "2.5")
-  def apply[T](in: T): Box[T] = legacyNullTest(in)
 
   /**
    * Apply the specified PartialFunction to the specified value and return the result
@@ -172,11 +199,21 @@ sealed trait BoxTrait {
   def isA[A, B](in: A, clz: Class[B]): Box[B] =
   (Box !! in).isA(clz)
 
+  // NOTE: We use an existential type here so that you can invoke asA with
+  // just one type parameter. To wit, this lets you do:
+  //
+  //   Box.asA[Int](myVariableWithDifferentType)
+  //
+  // If instead asA was defined as asA[T, B], you would have to do:
+  //
+  //   Box.asA[DifferentType, Int](myVariableWithDifferentType)
+  //
+  // Uglier, and generally not as nice.
   /**
    * Create a Full box containing the specified value if <code>in</code> is of
    * type <code>B</code>; Empty otherwise.
    */
-  def asA[B](in: T forSome {type T})(implicit m: Manifest[B]): Box[B] =
+  def asA[B](in: T forSome { type T })(implicit m: Manifest[B]): Box[B] =
   (Box !! in).asA[B]
 }
 
@@ -235,36 +272,12 @@ sealed abstract class Box[+A] extends Product with Serializable{
   def openOrThrowException(justification: String): A
 
   /**
-   * Return the value contained in this Box if it is Full;
-   * throw an exception otherwise.
-   *
-   * Using open_! in an example posted to the Lift mailing list
-   * may disqualify you for a helpful response.
-   *
-   * The method has a '!' in its name.  This means "don't use it unless
-   * you are 100% sure that the Box is Full and you should probably
-   * comment your code with the explanation of the guaranty."
-   * The better case for extracting the value out of a Box can
-   * be found at http://lift.la/scala-option-lift-box-and-how-to-make-your-co
-   *
-   * @return the value contained in this Box if it is full; throw an exception otherwise
+   * Exists to avoid the implicit conversion from Box to Option. Opening a Box
+   * unsafely should be done using openOrThrowException.
    */
-  @deprecated("use openOrThrowException, or better yet, do the right thing with your code and use map, flatMap or foreach", "2.4")
-  final def open_! : A = openOrThrowException("Legacy method implementation")
-
-  /**
-   * Return the value contained in this Box if it is Full;
-   * throw an exception otherwise.
-   * This means "don't use it unless
-   * you are 100% sure that the Box is Full and you should probably
-   * comment your code with the explanation of the guaranty.
-   * The better case for extracting the value out of a Box can
-   * be found at http://lift.la/scala-option-lift-box-and-how-to-make-your-co
-   *
-   * @return the value contained in this Box if it is full; throw an exception otherwise
-   */
-  @deprecated("use openOrThrowException, or better yet, do the right thing with your code and use map, flatMap or foreach", "2.4")
-  final def openTheBox: A = openOrThrowException("Legacy method implementation")
+  final def get: Nothing = {
+    throw new Exception("Attempted to open a Box incorrectly. Please use openOrThrowException.")
+  }
 
   /**
    * Return the value contained in this Box if it is full; otherwise return the specified default
@@ -310,9 +323,15 @@ sealed abstract class Box[+A] extends Product with Serializable{
 
   /**
    * Determine whether this Box contains a value which satisfies the specified predicate
-   * @return true if this Box's value satisfies the specified predicate
+   * @return true if this Box does contain a value and it satisfies the predicate
    */
   def exists(func: A => Boolean): Boolean = false
+
+  /**
+   * Determine whether all Box values satisfy the predicate
+   * @return true if the Box is empty, or if Box's value satisfies the predicate
+   */
+  def forall(func: A => Boolean): Boolean = true
 
   /**
    * Creates a Box if the current Box is Full and the value does not satisfy the predicate, f.
@@ -381,6 +400,8 @@ sealed abstract class Box[+A] extends Product with Serializable{
    * @return a Failure with the message if this Box is Empty
    */
   def ?~(msg: => String): Box[A] = this
+
+
 
   /**
    * Transform an Empty to a ParamFailure with the specified typesafe
@@ -475,6 +496,18 @@ sealed abstract class Box[+A] extends Product with Serializable{
    */
   def dmap[B](dflt: => B)(f: A => B): B = dflt
 
+
+  /**
+   * If the Box is Full, apply the transform function on the
+   * value, otherwise just return the value untransformed
+   *
+   * @param v the value
+   * @param f the transformation function
+   * @tparam T the type of the value
+   * @return the value or the transformed value is the Box is Full
+   */
+  def fullXform[T](v: T)(f: T => A => T): T = v
+
   /**
    * An <code>Either</code> that is a <code>Left</code> with the given argument
    * <code>left</code> if this is empty, or a <code>Right</code> if this
@@ -500,6 +533,7 @@ sealed abstract class Box[+A] extends Product with Serializable{
     if (pf.isDefinedAt(value)) Full(pf(value))
     else Empty)
   }
+
 }
 
 /**
@@ -546,6 +580,8 @@ final case class Full[+A](value: A) extends Box[A]{
 
   override def exists(func: A => Boolean): Boolean = func(value)
 
+  override def forall(func: A => Boolean): Boolean = func(value)
+
   override def filter(p: A => Boolean): Box[A] = if (p(value)) this else Empty
 
   override def foreach[U](f: A => U): Unit = f(value)
@@ -561,6 +597,18 @@ final case class Full[+A](value: A) extends Box[A]{
   override def toOption: Option[A] = Some(value)
 
   override def run[T](in: => T)(f: (T, A) => T) = f(in, value)
+
+  /**
+   * If the Box is Full, apply the transform function on the
+   * value, otherwise just return the value untransformed
+   *
+   * @param v the value
+   * @param f the transformation function
+   * @tparam T the type of the value
+   * @return the value or the transformed value is the Box is Full
+   */
+  override def fullXform[T](v: T)(f: T => A => T): T = f(v)(value)
+
 
   /**
    * An <code>Either</code> that is a <code>Left</code> with the given argument
@@ -590,7 +638,7 @@ final case class Full[+A](value: A) extends Box[A]{
     case _ => Empty
   }
 
-  override def asA[B](implicit m: Manifest[B]): Box[B] = this.isA(m.erasure).asInstanceOf[Box[B]]
+  override def asA[B](implicit m: Manifest[B]): Box[B] = this.isA(m.runtimeClass).asInstanceOf[Box[B]]
 
   override def ===[B >: A](to: B): Boolean = value == to
 

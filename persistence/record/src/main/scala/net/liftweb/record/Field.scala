@@ -18,6 +18,7 @@ package net.liftweb
 package record
 
 import net.liftweb.common._
+import net.liftweb.http.S
 import net.liftweb.http.js.{JsExp}
 import net.liftweb.json.JsonAST.{JNothing, JNull, JString, JValue}
 import net.liftweb.util._
@@ -51,11 +52,6 @@ trait AbstractField extends FieldIdentifier with util.BaseField {
    * Is the value of this field optional (e.g. NULLable)?
    */
   def optional_? = false
-
-  /**
-   * The text name of this field
-   */
-  def name: String = fieldName
 
   /**
    * Can the value of this field be read without obscuring the result?
@@ -174,11 +170,21 @@ trait BaseField extends AbstractField with JsonReadable {
 }
 
 /** Refined trait for fields owned by a particular record type */
-trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _, _]] extends AbstractField {
+trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _, MetaType], MetaType <: GenericMetaRecord[OwnerType, _, MetaType]] extends AbstractField {
   /**
    * Return the owner of this field
    */
   def owner: OwnerType
+
+  /**
+   * The text name of this field
+   */
+  def name: String = RecordRules.fieldName.vend.apply(owner.meta.connectionIdentifier, fieldName)
+
+  /**
+    * The display name of this field (e.g., "First Name")
+    */
+  override def displayName: String = RecordRules.displayName.vend.apply(owner, S.locale, name)
 
   /**
    * Are we in "safe" mode (i.e., the value of the field can be read or written without any security checks.)
@@ -186,7 +192,7 @@ trait GenericOwnedField[OwnerType <: GenericRecord[OwnerType, _, _]] extends Abs
   override final def safe_? : Boolean = owner.safe_?
 }
 
-trait OwnedField[OwnerType <: Record[OwnerType]] extends GenericOwnedField[OwnerType] with BaseField
+trait OwnedField[OwnerType <: Record[OwnerType]] extends GenericOwnedField[OwnerType, MetaRecord[OwnerType]] with BaseField
 
 trait AbstractTypedField[ThisType] extends AbstractField {
 
@@ -306,10 +312,10 @@ trait AbstractTypedField[ThisType] extends AbstractField {
 
   /** Generic implementation of setFromAny that implements exactly what the doc for setFromAny specifies, using a Manifest to check types */
   protected final def genericSetFromAny(in: Any)(implicit m: Manifest[MyType]): Box[MyType] = in match {
-    case value       if m.erasure.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
-    case Some(value) if m.erasure.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
-    case Full(value) if m.erasure.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
-    case (value)::_  if m.erasure.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
+    case value       if m.runtimeClass.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
+    case Some(value) if m.runtimeClass.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
+    case Full(value) if m.runtimeClass.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
+    case (value)::_  if m.runtimeClass.isInstance(value) => setBox(Full(value.asInstanceOf[MyType]))
     case     (value: String) => setFromString(value)
     case Some(value: String) => setFromString(value)
     case Full(value: String) => setFromString(value)
@@ -381,8 +387,6 @@ trait MandatoryTypedField[ThisType] extends TypedField[ThisType] with Product1[T
 
   def get: MyType = value
 
-  def is: MyType = value
-
   protected def liftSetFilterToBox(in: Box[MyType]): Box[MyType] = in.map(v => setFilter.foldLeft(v)((prev, f) => f(prev)))
 
   /**
@@ -429,8 +433,6 @@ trait OptionalTypedField[ThisType] extends TypedField[ThisType] with Product1[Bo
 
   def get: Option[MyType] = value
 
-  def is: Option[MyType] = value
-
   protected def liftSetFilterToBox(in: Box[MyType]): Box[MyType] =  setFilter.foldLeft(in){ (prev, f) =>
 	prev match {
 	  case fail: Failure => fail //stop on failure, otherwise some filters will clober it to Empty
@@ -451,7 +453,7 @@ trait OptionalTypedField[ThisType] extends TypedField[ThisType] with Product1[Bo
 /**
  * A simple field that can store and retrieve a value of a given type
  */
-trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _, MetaType], MetaType <: GenericMetaRecord[OwnerType, _, MetaType]] extends GenericOwnedField[OwnerType] with AbstractTypedField[ThisType] {
+trait GenericField[ThisType, OwnerType <: GenericRecord[OwnerType, _, MetaType], MetaType <: GenericMetaRecord[OwnerType, _, MetaType]] extends GenericOwnedField[OwnerType, MetaType] with AbstractTypedField[ThisType] {
 
   def apply(in: MyType): OwnerType = apply(Full(in))
 

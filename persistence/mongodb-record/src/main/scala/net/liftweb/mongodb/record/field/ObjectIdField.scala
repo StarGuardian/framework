@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2011 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ package record
 package field
 
 import scala.xml.NodeSeq
+
+import java.util.Date
 
 import net.liftweb.common.{Box, Empty, Failure, Full}
 import net.liftweb.http.js.JE.{JsNull, JsObj, JsRaw, Str}
@@ -74,7 +76,7 @@ class ObjectIdField[OwnerType <: BsonRecord[OwnerType]](rec: OwnerType)
       <input type="text"
         name={funcName}
         value={valueBox.map(s => s.toString) openOr ""}
-        tabindex={tabIndex toString}/>
+        tabindex={tabIndex.toString}/>
     }
 
   def toForm =
@@ -88,6 +90,8 @@ class ObjectIdField[OwnerType <: BsonRecord[OwnerType]](rec: OwnerType)
     case jv => JsRaw(Printer.compact(render(jv)))
   }
 
-  def asJValue: JValue = valueBox.map(v => Meta.objectIdAsJValue(v, owner.meta.formats)) openOr (JNothing: JValue)
+  def asJValue: JValue = valueBox.map(v => JsonObjectId.asJValue(v, owner.meta.formats)) openOr (JNothing: JValue)
+
+  def createdAt: Date = this.get.getDate
 }
 

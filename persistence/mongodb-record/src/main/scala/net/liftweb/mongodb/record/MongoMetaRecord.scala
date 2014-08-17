@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2012 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import net.liftweb.mongodb.record.field._
 import net.liftweb.record.{MandatoryTypedField, MetaRecord, Record}
 import net.liftweb.record.FieldHelpers.expectedA
 import net.liftweb.record.field._
+import net.liftweb.util.ConnectionIdentifier
 
 import com.mongodb._
 import com.mongodb.util.JSON
@@ -52,6 +53,17 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
     case f: MandatoryTypedField[_] => f.value
     case x => x
   }
+
+  /*
+   * Use the collection associated with this Meta.
+   */
+  def useColl[T](f: DBCollection => T): T =
+    MongoDB.useCollection(connectionIdentifier, collectionName)(f)
+
+  /*
+   * Use the db associated with this Meta.
+   */
+  def useDb[T](f: DB => T): T = MongoDB.use(connectionIdentifier)(f)
 
   /**
   * Delete the instance from backing store
@@ -130,15 +142,14 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
   def find(k: String, o: Any): Box[BaseRecord] = find(new BasicDBObject(k, o))
 
   /**
-  * Find all rows in this collection
-  */
-  def findAll: List[BaseRecord] = {
-    /*
-    * The call to toArray retrieves all documents and puts them in memory.
+    * Find all rows in this collection.
+    * Retrieves all documents and puts them in memory.
     */
-    useColl( coll => {
-      coll.find.toArray.map(dbo => fromDBObject(dbo)).toList
-    })
+  def findAll: List[BaseRecord] = useColl { coll =>
+    /** Mongo Cursors are both Iterable and Iterator,
+      * so we need to reduce ambiguity for implicits
+      */
+    (coll.find: Iterator[DBObject]).map(fromDBObject).toList
   }
 
   /**
@@ -158,16 +169,16 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
   protected def findAll(sort: Option[DBObject], opts: FindOption*)(f: (DBCollection) => DBCursor): List[BaseRecord] = {
     val findOpts = opts.toList
 
-    useColl( coll => {
+    useColl { coll =>
       val cur = f(coll).limit(
-        findOpts.find(_.isInstanceOf[Limit]).map(x => x.value).getOrElse(0)
+        findOpts.find(_.isInstanceOf[Limit]).map(_.value).getOrElse(0)
       ).skip(
-        findOpts.find(_.isInstanceOf[Skip]).map(x => x.value).getOrElse(0)
+        findOpts.find(_.isInstanceOf[Skip]).map(_.value).getOrElse(0)
       )
-      sort.foreach( s => cur.sort(s))
-      // The call to toArray retrieves all documents and puts them in memory.
-      cur.toArray.map(dbo => fromDBObject(dbo)).toList
-    })
+      sort.foreach(s => cur.sort(s))
+      // This retrieves all documents and puts them in memory.
+      (cur: Iterator[DBObject]).map(fromDBObject).toList
+    }
   }
 
   /**
@@ -236,6 +247,22 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
     true
   }
 
+  protected def updateOp(inst: BaseRecord)(f: => Unit): Unit = {
+    foreachCallback(inst, _.beforeUpdate)
+    f
+    foreachCallback(inst, _.afterUpdate)
+    inst.allFields.foreach { _.resetDirty }
+  }
+
+  /**
+    * Save the instance in the appropriate backing store. Uses the WriteConcern set on the MongoClient instance.
+    */
+  def save(inst: BaseRecord): Boolean = saveOp(inst) {
+    useColl { coll =>
+      coll.save(inst.asDBObject)
+    }
+  }
+
   /**
   * Save the instance in the appropriate backing store
   */
@@ -266,14 +293,14 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
   /*
   * Update records with a JObject query using the given Mongo instance
   */
-  def update(qry: JObject, newbr: BaseRecord, db: DB, opts: UpdateOption*) {
+  def update(qry: JObject, newbr: BaseRecord, db: DB, opts: UpdateOption*): Unit = {
     update(JObjectParser.parse(qry), newbr.asDBObject, db, opts :_*)
   }
 
   /*
   * Update records with a JObject query
   */
-  def update(qry: JObject, newbr: BaseRecord, opts: UpdateOption*) {
+  def update(qry: JObject, newbr: BaseRecord, opts: UpdateOption*): Unit =  {
     useDb ( db =>
       update(qry, newbr, db, opts :_*)
     )
@@ -321,7 +348,7 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
     *
     * Note: PatternField will always set the dirty flag when set.
     */
-  def update(inst: BaseRecord): Unit = {
+  def update(inst: BaseRecord): Unit = updateOp(inst) {
     val dirtyFields = fields(inst).filter(_.dirty_?)
     if (dirtyFields.length > 0) {
       val (fullFields, otherFields) = dirtyFields
@@ -359,7 +386,6 @@ trait MongoMetaRecord[BaseRecord <: MongoRecord[BaseRecord]]
         }
 
         update(inst, dbo.get)
-        dirtyFields.foreach { _.resetDirty }
       }
     }
   }

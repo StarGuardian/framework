@@ -24,9 +24,29 @@ import net.liftweb.common._
 import net.liftweb.http.js._
 import Helpers._
 
-
 private[http] trait LiftMerge {
   self: LiftSession =>
+
+  private def scriptUrl(scriptFile: String) = {
+    S.encodeURL(s"${LiftRules.liftPath}/$scriptFile")
+  }
+
+  // Gather all page-specific JS into one JsCmd.
+  private def assemblePageSpecificJavaScript: JsCmd = {
+    val allJs =
+      LiftRules.javaScriptSettings.vend().map { settingsFn =>
+        LiftJavaScript.initCmd(settingsFn(this))
+      }.toList ++
+      S.jsToAppend
+
+    allJs.foldLeft(js.JsCmds.Noop)(_ & _)
+  }
+
+  private def pageScopedScriptFileWith(cmd: JsCmd) = {
+    pageScript(Full(JavaScriptResponse(cmd, Nil, Nil, 200)))
+
+    <script type="text/javascript" src={scriptUrl(s"page/${RenderVersion.get}.js")}></script>
+  }
 
   /**
    * Manages the merge phase of the rendering pipeline
@@ -79,7 +99,6 @@ private[http] trait LiftMerge {
     addlHead ++= S.forHead()
     val addlTail = new ListBuffer[Node]
     addlTail ++= S.atEndOfBody()
-    val cometTimes = new ListBuffer[CometVersionPair]
     val rewrite = URLRewriter.rewriteFunc
     val fixHref = Req.fixHref
 
@@ -87,13 +106,6 @@ private[http] trait LiftMerge {
 
     def fixAttrs(original: MetaData, toFix: String, attrs: MetaData, fixURL: Boolean): MetaData = attrs match {
       case Null => Null
-      case p: PrefixedAttribute if p.key == "when" && p.pre == "lift" =>
-        val when = p.value.text
-        original.find(a => !a.isPrefixed && a.key == "id").map {
-          id =>
-                  cometTimes += CVP(id.value.text, when.toLong)
-        }
-        fixAttrs(original, toFix, p.next, fixURL)
       case u: UnprefixedAttribute if u.key == toFix =>
         new UnprefixedAttribute(toFix, fixHref(contextPath, attrs.value, fixURL, rewrite), fixAttrs(original, toFix, attrs.next, fixURL))
       case _ => attrs.copy(fixAttrs(original, toFix, attrs.next, fixURL))
@@ -112,22 +124,22 @@ private[http] trait LiftMerge {
                 var bodyTail = false
 
                 v match {
-                  case e: Elem if e.label == "html" && 
+                  case e: Elem if e.label == "html" &&
                   !inHtml => htmlTag = e; inHtml = true && doMergy
 
-                  case e: Elem if e.label == "head" && inHtml && 
-                  !inBody => headTag = e; 
+                  case e: Elem if e.label == "head" && inHtml &&
+                  !inBody => headTag = e;
                   inHead = true && doMergy; justHead = true && doMergy
 
-                  case e: Elem if (e.label == "head" || 
-                                   e.label.startsWith("head_")) && 
+                  case e: Elem if (e.label == "head" ||
+                                   e.label.startsWith("head_")) &&
                   inHtml && inBody => bodyHead = true && doMergy
 
-                  case e: Elem if e.label == "tail" && inHtml && 
+                  case e: Elem if e.label == "tail" && inHtml &&
                   inBody => bodyTail = true && doMergy
 
                   case e: Elem if e.label == "body" && inHtml =>
-                    bodyTag = e; inBody = true && doMergy; 
+                    bodyTag = e; inBody = true && doMergy;
                   justBody = true && doMergy
 
                   case _ =>
@@ -144,11 +156,11 @@ private[http] trait LiftMerge {
                       node <- _fixHtml(nodes, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy)
                     } yield node
 
-                  case e: Elem if e.label == "form" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "action", v.attributes, true), v.scope, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
-                  case e: Elem if e.label == "script" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "src", v.attributes, false), v.scope, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
-                  case e: Elem if e.label == "a" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "href", v.attributes, true), v.scope, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
-                  case e: Elem if e.label == "link" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "href", v.attributes, false), v.scope, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
-                  case e: Elem => Elem(v.prefix, v.label, fixAttrs(v.attributes, "src", v.attributes, true), v.scope, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
+                  case e: Elem if e.label == "form" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "action", v.attributes, true), v.scope, e.minimizeEmpty, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
+                  case e: Elem if e.label == "script" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "src", v.attributes, false), v.scope,  e.minimizeEmpty, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
+                  case e: Elem if e.label == "a" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "href", v.attributes, true), v.scope,  e.minimizeEmpty, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
+                  case e: Elem if e.label == "link" => Elem(v.prefix, v.label, fixAttrs(v.attributes, "href", v.attributes, false), v.scope,  e.minimizeEmpty,_fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
+                  case e: Elem => Elem(v.prefix, v.label, fixAttrs(v.attributes, "src", v.attributes, true), v.scope,  e.minimizeEmpty, _fixHtml(v.child, inHtml, inHead, justHead, inBody, justBody, bodyHead, bodyTail, doMergy): _*)
                   case c: Comment if stripComments => NodeSeq.Empty
                   case _ => v
                 }
@@ -183,62 +195,51 @@ private[http] trait LiftMerge {
         headChildren += nl
       }
 
-      // Appends ajax stript to body
+      // Appends ajax script to body
       if (LiftRules.autoIncludeAjaxCalc.vend().apply(this)) {
         bodyChildren +=
-                <script src={S.encodeURL(contextPath + "/" +
-                        LiftRules.ajaxPath +
-                        "/" + LiftRules.ajaxScriptName())}
+                <script src={S.encodeURL(contextPath + "/"+LiftRules.resourceServerPath+"/lift.js")}
                 type="text/javascript"/>
         bodyChildren += nl
       }
 
-      val cometList = cometTimes.toList
-
-      // Appends comet stript reference to head
-      if (!cometList.isEmpty && LiftRules.autoIncludeComet(this)) {
-        bodyChildren +=
-                <script src={S.encodeURL(contextPath + "/" +
-                        LiftRules.cometPath +
-                        "/" + urlEncode(this.uniqueId) +
-                        "/" + LiftRules.cometScriptName())}
-                type="text/javascript"/>
-        bodyChildren += nl
+      val pageJs = assemblePageSpecificJavaScript
+      if (pageJs.toJsCmd.trim.nonEmpty) {
+        addlTail += pageScopedScriptFileWith(pageJs)
       }
 
-      S.jsToAppend match {
-        case Nil => 
-        case x :: Nil => addlTail += js.JsCmds.Script(x)
-        case xs => addlTail += js.JsCmds.Script(xs.foldLeft(js.JsCmds.Noop)(_ & _))
-      }
-
-      for{
+      for {
         node <- HeadHelper.removeHtmlDuplicates(addlTail.toList)
       } bodyChildren += node
 
       bodyChildren += nl
 
-      if (!cometList.isEmpty && LiftRules.autoIncludeComet(this)) {
-        bodyChildren += JsCmds.Script(LiftRules.renderCometPageContents(this, cometList))
-        bodyChildren += nl
-      }
-
-      if (LiftRules.enableLiftGC && stateful_?) {
-        import js._
-        import JsCmds._
-        import JE._
-
-        bodyChildren += JsCmds.Script((if (!cometList.isEmpty || hasFuncsForOwner(RenderVersion.get)) OnLoad(JsRaw("liftAjax.lift_successRegisterGC()")) else Noop) &
-                JsCrVar("lift_page", RenderVersion.get))
-      }
+      val autoIncludeComet = LiftRules.autoIncludeComet(this)
+      val bodyAttributes: List[(String, String)] =
+        if (stateful_? && (autoIncludeComet || LiftRules.enableLiftGC)) {
+          ("data-lift-gc" -> RenderVersion.get) ::
+          (
+            if (autoIncludeComet) {
+              ("data-lift-session-id" -> (S.session.map(_.uniqueId) openOr "xx")) ::
+              S.requestCometVersions.is.toList.map {
+                case CometVersionPair(guid, version) =>
+                  (s"data-lift-comet-$guid" -> version.toString)
+              }
+            } else {
+              Nil
+            }
+          )
+        } else {
+          Nil
+        }
 
       htmlKids += nl
-      htmlKids += Elem(headTag.prefix, headTag.label, headTag.attributes, headTag.scope, headChildren.toList: _*)
+      htmlKids += headTag.copy(child = headChildren.toList)
       htmlKids += nl
-      htmlKids += Elem(bodyTag.prefix, bodyTag.label, bodyTag.attributes, bodyTag.scope, bodyChildren.toList: _*)
+      htmlKids += bodyAttributes.foldLeft(bodyTag.copy(child = bodyChildren.toList))(_ % _)
       htmlKids += nl
 
-      val tmpRet = Elem(htmlTag.prefix, htmlTag.label, htmlTag.attributes, htmlTag.scope, htmlKids.toList: _*)
+      val tmpRet = Elem(htmlTag.prefix, htmlTag.label, htmlTag.attributes, htmlTag.scope, htmlTag.minimizeEmpty, htmlKids.toList: _*)
 
       val ret: Node = if (Props.devMode) {
         LiftRules.xhtmlValidator.toList.flatMap(_(tmpRet)) match {
@@ -252,7 +253,7 @@ private[http] trait LiftMerge {
             val rule = new RewriteRule {
               override def transform(n: Node) = n match {
                 case e: Elem if e.label == "body" =>
-                  Elem(e.prefix, e.label, e.attributes, e.scope, e.child ++ errors: _*)
+                  e.copy(child = e.child ++ errors)
 
                 case x => super.transform(x)
               }

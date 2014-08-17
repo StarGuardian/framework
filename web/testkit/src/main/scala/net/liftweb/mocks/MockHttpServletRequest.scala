@@ -59,12 +59,6 @@ import json.JsonAST._
  *
  */
 class MockHttpServletRequest(val url : String = null, var contextPath : String = "") extends HttpServletRequest {
-  @deprecated("Use the \"attributes\" var instead", "2.4")
-  def attr = attributes
-
-  @deprecated("Use the \"attributes\" var instead", "2.4")
-  def attr_= (attrs : Map[String,Object]) = attributes = attrs
-
   var attributes: Map[String, Object] = Map()
 
   var authType: String = null
@@ -183,16 +177,6 @@ class MockHttpServletRequest(val url : String = null, var contextPath : String =
    */
   var parameters : List[(String,String)] = Nil
 
-  @deprecated("Use the \"parameters\" var instead", "2.4")
-  def parameterMap = Map(parameters : _*)
-
-  @deprecated("Use the \"parameters\" var instead", "2.4")
-  def parameterMap_= (params : Map[String, List[String]]) {
-    parameters = params.toList.flatMap {
-      case (key,values) => values.map{(key,_)}
-    }
-  }
-
   var path : String = "/"
 
   var pathInfo : String = null
@@ -215,6 +199,11 @@ class MockHttpServletRequest(val url : String = null, var contextPath : String =
           case Array(key,value) => {
             // Append to the current key's value
             newParams += key -> value
+          }
+          case Array("") => throw new IllegalArgumentException("Invalid query string: \"" + q + "\"")
+          case Array(key) => {
+            // Append to the current key's value
+            newParams += key -> ""
           }
           case invalid => throw new IllegalArgumentException("Invalid query string: \"" + q + "\"")
         }

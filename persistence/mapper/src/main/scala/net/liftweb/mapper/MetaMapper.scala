@@ -21,14 +21,16 @@ import java.lang.reflect.Method
 import java.sql.{ResultSet, Types, PreparedStatement}
 import java.util.{Date, Locale}
 
-import collection.mutable.{ListBuffer, HashMap}
-import collection.immutable.{SortedMap, TreeMap}
+import scala.language.existentials
+
+import scala.collection.mutable.{ListBuffer, HashMap}
+import scala.collection.immutable.{SortedMap, TreeMap}
 import xml._
 
 import common._
 import json._
 import util.Helpers._
-import util.{NamedPF, FieldError, Helpers}
+import util.{SourceFieldMetadata, NamedPF, FieldError, Helpers,CssSel,PassThru}
 import http.{LiftRules, S, SHtml, RequestMemoize, Factory}
 import http.js._
 
@@ -248,7 +250,7 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
   def countDb(dbId: ConnectionIdentifier, by: QueryParam[A]*): Long = {
     DB.use(dbId) {
       conn =>
-      val bl = by.toList ::: addlQueryParams.is
+      val bl = by.toList ::: addlQueryParams.get
       val (query, start, max) = addEndStuffs(addFields("SELECT COUNT(*) FROM "+MapperRules.quoteTableName.vend(_dbTableNameLC)+"  ", false, bl, conn), bl, conn)
 
       DB.prepareStatement(query, conn) {
@@ -294,7 +296,7 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
           case x => List(x)
         }
 
-        val lst: Set[FT] = Set(filter(ret.map(v => v.getSingleton.getActualField(v, j.field).is.asInstanceOf[FT])) :_*)
+        val lst: Set[FT] = Set(filter(ret.map(v => v.getSingleton.getActualField(v, j.field).get.asInstanceOf[FT])) :_*)
 
         j.field.dbKeyToTable.
         asInstanceOf[MetaMapper[A]].
@@ -319,16 +321,16 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
       }
 
       val map: Map[FT, MT] =
-      Map(ol.map(v => (v.primaryKeyField.is, v)) :_*)
+      Map(ol.map(v => (v.primaryKeyField.get, v)) :_*)
 
       for (i <- ret) {
         val field: MappedForeignKey[FT, A, _] =
         getActualField(i, j.field).asInstanceOf[MappedForeignKey[FT, A, _]]
 
-        map.get(field.is) match {
+        map.get(field.get) match {
           case v => field._primeObj(Box(v))
         }
-        //field.primeObj(Box(map.get(field.is).map(_.asInstanceOf[QQ])))
+        //field.primeObj(Box(map.get(field.get).map(_.asInstanceOf[QQ])))
       }
     }
 
@@ -347,7 +349,7 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
   def bulkDelete_!!(dbId: ConnectionIdentifier, by: QueryParam[A]*): Boolean = {
     DB.use(dbId) {
       conn =>
-      val bl = by.toList ::: addlQueryParams.is
+      val bl = by.toList ::: addlQueryParams.get
       val (query, start, max) = addEndStuffs(addFields("DELETE FROM "+MapperRules.quoteTableName.vend(_dbTableNameLC)+" ", false, bl, conn), bl, conn)
 
       DB.prepareStatement(query, conn) {
@@ -387,7 +389,7 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
    */
   def buildSelectString(fields: Seq[SelectableField], conn: SuperConnection, by: QueryParam[A]*):
   (String, Box[Long], Box[Long], List[QueryParam[A]]) = {
-    val bl = by.toList ::: addlQueryParams.is
+    val bl = by.toList ::: addlQueryParams.get
     val selectStatement = "SELECT "+
     distinct(by)+
     fields.map(_.dbSelectString).
@@ -672,10 +674,11 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
     import JsonAST._
 
     ret.runSafe {
-      for {
-        field <- json.obj
-        JField("$persisted", JBool(per)) <- field
-      } ret.persisted_? = per
+      json.findField {
+        case JField("$persisted", JBool(per)) =>
+          ret.persisted_? = per
+          true
+      }
 
       for {
         field <- json.obj
@@ -731,7 +734,7 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
   Elem(null,elemName,
        mappedFieldList.foldRight[MetaData](Null) {(p, md) => val fld = ??(p.method, what)
                                                   new UnprefixedAttribute(p.name, Text(fld.toString), md)}
-       ,TopScope)
+       ,TopScope, true)
 
   /**
    * Returns true if none of the fields are dirty
@@ -1054,10 +1057,30 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
     }
   }
 
-  def fieldMapperPF(transform: (BaseOwnedMappedField[A] => NodeSeq), actual: A): PartialFunction[String, NodeSeq => NodeSeq] = {
-    Map.empty ++ mappedFieldList.map ( mf =>
-      (mf.name, ((ignore: NodeSeq) => transform(??(mf.method, actual))))
-    )
+  /**
+   * A set of CssSels that can be used to bind this MetaMapper's fields.
+   *
+   * Elements with a class matching the field name are mapped to the NodeSeq
+   * produced by the fieldHtml function that is passed in.
+   *
+   * So, with a MetaMapper that has three fields, name, date, and description,
+   * the resulting CSS selector transforms are:
+   *
+   * {{{
+   * Seq(
+   *   ".name" #> fieldHtml(-name field-),
+   *   ".date" #> fieldHtml(-date field-),
+   *   ".description" #> fieldHtml(-description field-)
+   * )
+   * }}}
+   *
+   * Above, -name field-, -date field-, and -description field- refer to the
+   * actual MappedField objects for those fields.
+   */
+  def fieldMapperTransforms(fieldHtml: (BaseOwnedMappedField[A]=>NodeSeq), mappedObject: A): Seq[CssSel] = {
+    mappedFieldList.map { field =>
+      s".${field.name}" #> fieldHtml(??(field.method, mappedObject))
+    }
   }
 
   private[mapper] def checkFieldNames(in: A): Unit = {
@@ -1126,7 +1149,9 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
 
     for (v <- mapperAccessMethods) {
       v.invoke(this) match {
-        case mf: MappedField[AnyRef, A] if !mf.ignoreField_? =>
+        case untypedMf: MappedField[_, _] if !untypedMf.ignoreField_? =>
+          val mf = untypedMf.asInstanceOf[MappedField[AnyRef,A]]
+
           mf.setName_!(v.getName)
           tArray += FieldHolder(mf.name, v, mf)
           for (colName <- mf.dbColumnNames(v.getName).map(MapperRules.quoteColumnName.vend).map(_.toLowerCase)) {
@@ -1224,14 +1249,27 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
              actual.suplementalJs(Empty) :_*)
   }
 
+  /**
+   * Get a list of all the fields
+   * @return a list of all the fields
+   */
+  lazy val doAllFieldNames: Seq[(String, SourceFieldMetadata)] =
+  mappedFieldList.map(fh => fh.name.toLowerCase -> fh.field.sourceInfoMetadata())
 
+  /**
+   * Get a list of all the fields as a map
+   * @return a list of all the fields
+   */
+  lazy val fieldNamesAsMap: Map[String, SourceFieldMetadata] = Map(doAllFieldNames :_*)
 
   def asHtml(toLine: A): NodeSeq =
   Text(internalTableName_$_$) :: Text("={ ") ::
-  (for (mft <- mappedFieldList if mft.field.dbDisplay_? ;
-        val field = ??(mft.method, toLine)) yield
-   <span>{field.displayName}={field.asHtml}&nbsp;</span>
-  ) :::List(Text(" }"))
+    (for {
+      mft <- mappedFieldList if mft.field.dbDisplay_?
+      field = ??(mft.method, toLine)
+    } yield {
+     <span>{field.displayName}={field.asHtml}&nbsp;</span>
+    }) ::: List(Text(" }"))
 
 
   /**
@@ -1676,11 +1714,11 @@ object By {
     case _ => NullRef(field)
   }
   def apply[O <: Mapper[O],T,  Q <: KeyedMapper[T, Q]](field: MappedForeignKey[T, O, Q], value: Q) =
-  Cmp[O,T](field, Eql, Full(value.primaryKeyField.is), Empty, Empty)
+  Cmp[O,T](field, Eql, Full(value.primaryKeyField.get), Empty, Empty)
 
   def apply[O <: Mapper[O],T, Q <: KeyedMapper[T, Q]](field: MappedForeignKey[T, O, Q], value: Box[Q]) =
   value match {
-    case Full(v) => Cmp[O,T](field, Eql, Full(v.primaryKeyField.is), Empty, Empty)
+    case Full(v) => Cmp[O,T](field, Eql, Full(v.primaryKeyField.get), Empty, Empty)
     case _ => Cmp(field, IsNull, Empty, Empty, Empty)
   }
 }
@@ -1720,10 +1758,10 @@ object NotBy {
   }
 
   def apply[O <: Mapper[O],T,  Q <: KeyedMapper[T, Q]](field: MappedForeignKey[T, O, Q], value: Q) =
-  Cmp[O,T](field, <>, Full(value.primaryKeyField.is), Empty, Empty)
+  Cmp[O,T](field, <>, Full(value.primaryKeyField.get), Empty, Empty)
   def apply[O <: Mapper[O],T, Q <: KeyedMapper[T, Q]](field: MappedForeignKey[T, O, Q], value: Box[Q]) =
   value match {
-    case Full(v) => Cmp[O,T](field, <>, Full(v.primaryKeyField.is), Empty, Empty)
+    case Full(v) => Cmp[O,T](field, <>, Full(v.primaryKeyField.get), Empty, Empty)
     case _ => Cmp(field, IsNotNull, Empty, Empty, Empty)
   }
 }
@@ -1784,7 +1822,7 @@ trait KeyedMetaMapper[Type, A<:KeyedMapper[Type, A]] extends MetaMapper[A] with 
 
   def asSafeJs(actual: A, f: KeyObfuscator): JsExp = {
     val pk = actual.primaryKeyField
-    val first = (pk.name, JE.Str(f.obscure(self, pk.is)))
+    val first = (pk.name, JE.Str(f.obscure(self, pk.get)))
     JE.JsObj(
       first ::
         ("$lift_class", JE.Str(dbTableName)) ::
@@ -1794,7 +1832,7 @@ trait KeyedMetaMapper[Type, A<:KeyedMapper[Type, A]] extends MetaMapper[A] with 
           .flatMap{
             case fk0: MappedForeignKey[_, _, _] with MappedField[_, _] =>
               val fk = fk0.asInstanceOf[Q]
-              val key = f.obscure(fk.dbKeyToTable, fk.is)
+              val key = f.obscure(fk.dbKeyToTable, fk.get)
               List(
                 (fk.name, JE.Str(key)),
                 (fk.name+"_obj", JE.AnonFunc("index", JE.JsRaw("return index["+key.encJs+"];").cmd))
@@ -1961,49 +1999,65 @@ trait KeyedMetaMapper[Type, A<:KeyedMapper[Type, A]] extends MetaMapper[A] with 
     val Name = internal_dbTableName
 
     NamedPF("crud "+Name) {
-      case Name :: "add"  :: _ => addSnippet
-      case Name :: "edit" :: _ => editSnippet
-      case Name :: "view" :: _ => viewSnippet
+      case Name :: "addForm"  :: _ => addFormSnippet
+      case Name :: "editForm" :: _ => editFormSnippet
+      case Name :: "viewTransform" :: _ => viewTransform
     }
   }
 
-  /**
-   * Default snippet for modification. Used by the default add and edit snippets.
+   /**
+   * Provides basic transformation of <code>html</code> to a form for the
+   * given <code>obj</code>. When the form is submitted, <code>cleanup</code>
+   * is run.
    */
-  def modSnippet(xhtml: NodeSeq, obj: A, cleanup: (A => Unit)): NodeSeq = {
+  def formSnippet(html: NodeSeq, obj: A, cleanup: (A => Unit)): NodeSeq = {
     val name = internal_dbTableName
 
     def callback() {
       cleanup(obj)
     }
 
-    xbind(name, xhtml)(obj.fieldPF orElse obj.fieldMapperPF(_.toForm.openOr(Text(""))) orElse {
-        case "submit" => label => SHtml.submit(label.text, callback _)
-      })
+    val submitTransform: (NodeSeq)=>NodeSeq =
+      "type=submit" #> SHtml.onSubmitUnit(callback _)
+
+    val otherTransforms =
+      obj.fieldMapperTransforms(_.toForm openOr Text("")).reverse ++
+      obj.fieldTransforms.reverse
+
+    otherTransforms.foldRight(submitTransform)(_ andThen _) apply html
   }
 
   /**
-   * Default add snippet. Override to change behavior of the add snippet.
+   * Base add form snippet. Fetches object from
+   * <code>addSnippetSetup</code> and invokes
+   * <code>addSnippetCallback</code> when the form is submitted.
    */
-  def addSnippet(xhtml: NodeSeq): NodeSeq = {
-    modSnippet(xhtml, addSnippetSetup, addSnippetCallback _)
+  def addFormSnippet(html: NodeSeq): NodeSeq = {
+    formSnippet(html, addSnippetSetup, addSnippetCallback _)
+  }
+
+ /**
+   * Base edit form snippet. Fetches object from
+   * <code>editSnippetSetup</code> and invokes
+   * <code>editSnippetCallback</code> when the form is submitted.
+   */
+  def editFormSnippet(html: NodeSeq): NodeSeq = {
+    formSnippet(html, editSnippetSetup, editSnippetCallback _)
   }
 
   /**
-   * Default edit snippet. Override to change behavior of the edit snippet.
+   * Basic transformation of <code>html</code> to HTML for displaying
+   * the object from <code>viewSnippetSetup</code>.
    */
-  def editSnippet(xhtml: NodeSeq): NodeSeq = {
-    modSnippet(xhtml, editSnippetSetup, editSnippetCallback _)
-  }
-
-  /**
-   * Default view snippet. Override to change behavior of the view snippet.
-   */
-  def viewSnippet(xhtml: NodeSeq): NodeSeq = {
-    val Name = internal_dbTableName
+  def viewTransform(html: NodeSeq): NodeSeq = {
+    val name = internal_dbTableName
     val obj: A = viewSnippetSetup
 
-    xbind(Name, xhtml)(obj.fieldPF orElse obj.fieldMapperPF(_.asHtml))
+    val otherTransforms =
+      obj.fieldMapperTransforms(_.asHtml).reverse ++
+      obj.fieldTransforms.reverse
+
+    otherTransforms.foldRight(PassThru: (NodeSeq)=>NodeSeq)(_ andThen _) apply html
   }
 
   /**
@@ -2095,7 +2149,7 @@ class KeyObfuscator {
 
   def obscure[KeyType, MetaType <: KeyedMapper[KeyType, MetaType]](what: KeyedMapper[KeyType, MetaType]): String =
   {
-    obscure(what.getSingleton, what.primaryKeyField.is)
+    obscure(what.getSingleton, what.primaryKeyField.get)
   }
 
   def apply[KeyType, MetaType <: KeyedMapper[KeyType, MetaType], Q <% KeyType](theType:

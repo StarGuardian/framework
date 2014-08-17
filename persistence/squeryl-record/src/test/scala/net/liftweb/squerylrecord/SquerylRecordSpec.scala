@@ -22,7 +22,7 @@ import org.squeryl.dsl.DateExpression
 
 import org.specs2.mutable.Specification
 import org.specs2.specification.AroundExample
-import org.specs2.execute.Result
+import org.specs2.execute.{ AsResult , Result }
 
 import record.{ BaseField, Record }
 import record.field._
@@ -44,11 +44,20 @@ class SquerylRecordSpec extends Specification with AroundExample {
   sequential
 
   lazy val session = new LiftSession("", Helpers.randomString(20), Empty)
+  // One of these is for specs2 2.x, the other for specs2 1.x
   protected def around[T <% Result](t: =>T) = {
     S.initIfUninitted(session) {
       DBHelper.initSquerylRecordWithInMemoryDB()
       DBHelper.createSchema()
       t
+    }
+  }
+
+  protected def around[T : AsResult](t: =>T) = {
+    S.initIfUninitted(session) {
+      DBHelper.initSquerylRecordWithInMemoryDB()
+      DBHelper.createSchema()
+      AsResult(t)
     }
   }
 
@@ -69,7 +78,7 @@ class SquerylRecordSpec extends Specification with AroundExample {
       transaction {
         S.initIfUninitted(session){
           val company = from(companies)(c =>
-            where(c.name === td.c1.name.is) select (c))
+            where(c.name === td.c1.name.get) select (c))
           checkCompaniesEqual(company.single, td.c1)
         }
       }
@@ -82,8 +91,8 @@ class SquerylRecordSpec extends Specification with AroundExample {
         val ids = orderedCompanies.map(_.id)
         // NOTE: This circumvents implicit conversion for the contents on List
         // ids must containInOrder(
-        //   td.allCompanies.sortBy(_.name.is).map(_.id))
-        ids.mkString("(", ",", ")") must_== td.allCompanies.sortBy(_.name.is).map(_.id).mkString("(", ",", ")")
+        //   td.allCompanies.sortBy(_.name.get).map(_.id))
+        ids.mkString("(", ",", ")") must_== td.allCompanies.sortBy(_.name.get).map(_.id).mkString("(", ",", ")")
       }
     }
 
@@ -192,7 +201,7 @@ class SquerylRecordSpec extends Specification with AroundExample {
           update(companies)(c => where(c.id === id)
             set (c.name := "Name2"))
           val afterPartialUpdate = companies.lookup(id).get
-          afterPartialUpdate.name.is must_== "Name2"
+          afterPartialUpdate.name.get must_== "Name2"
         }
       }
 
@@ -261,7 +270,7 @@ class SquerylRecordSpec extends Specification with AroundExample {
         val companyIdField: LongField[Company] = from(companies)(c => where(c.idField in
           from(companies)(c2 => where(c2.id === td.c1.id) select (c2.idField)))
           select (c.idField)).single
-        companyIdField.is must_== td.c1.id
+        companyIdField.get must_== td.c1.id
 
         // Strings should also be selectable in inner queries
         val companyIdByName: Long = from(companies)(c => where(c.name in
@@ -273,32 +282,32 @@ class SquerylRecordSpec extends Specification with AroundExample {
         val companyIdByCreated: DateTimeField[Company] = from(companies)(c => where(c.created in
           from(companies)(c2 => where(c2.id === td.c1.id) select (c2.created)))
           select (c.created)).single
-        companyIdByCreated.is must_== td.c1.created.is
+        companyIdByCreated.get must_== td.c1.created.get
 
         // Decimal Fields:
         val empSalary: DecimalField[Employee] = from(employees)(e => where(e.salary in
           from(employees)(e2 => where(e2.id === td.e1.id) select (e2.salary)))
           select (e.salary)).single
-        empSalary.is must_== td.e1.salary.is
+        empSalary.get must_== td.e1.salary.get
 
         // Email fields:
         val empEmail: EmailField[Employee] = from(employees)(e => where(e.email in
           from(employees)(e2 => where(e2.id === td.e1.id) select (e2.email)))
           select (e.email)).single
-        empSalary.is must_== td.e1.salary.is
+        empSalary.get must_== td.e1.salary.get
 
         // Boolean fields:
         val empAdmin: BooleanField[Employee] = from(employees)(e => where(e.admin in
           from(employees)(e2 => where(e2.id === td.e2.id) select (e2.admin)))
           select (e.admin)).single
-        empAdmin.is must_== td.e2.admin.is
+        empAdmin.get must_== td.e2.admin.get
 
         // Enum fields:
         val empRoleQuery = from(employees)(e => where(e.role in
           from(employees)(e2 => where(e2.id === td.e2.id) select (e2.role)))
           select (e.role.get))
         val empRole = empRoleQuery.single
-        empRole must_== td.e2.role.is
+        empRole must_== td.e2.role.get
       }
 
     }
@@ -379,6 +388,7 @@ class SquerylRecordSpec extends Specification with AroundExample {
       val company = from(companies)(company =>
         select(company)).page(0, 1).single
       company.allFields map { f => f.dirty_? must_== false }
+      success
     }
   }
   class ToChar(d: DateExpression[Timestamp], e: StringExpression[String], m: OutMapper[String])
@@ -434,9 +444,9 @@ class SquerylRecordSpec extends Specification with AroundExample {
     cmp.check(_.role)
 
     // Photo must be checked separately
-    e1.photo.is match {
+    e1.photo.get match {
       case Some(p) => {
-        val p2 = e2.photo.is
+        val p2 = e2.photo.get
         p2 must beSome[Array[Byte]]
         p2.get.size must_== p.size
 
@@ -444,7 +454,7 @@ class SquerylRecordSpec extends Specification with AroundExample {
           p2.get(i) must_== p(i)
         }
       }
-      case None => e2.photo.is must beNone
+      case None => e2.photo.get must beNone
     }
   }
 

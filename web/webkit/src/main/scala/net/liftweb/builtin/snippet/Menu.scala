@@ -18,6 +18,8 @@ package net.liftweb
 package builtin
 package snippet
 
+import scala.language.existentials
+
 import http.{S, DispatchSnippet, LiftRules}
 import http.js._
 import sitemap._
@@ -141,7 +143,7 @@ object Menu extends DispatchSnippet {
 
             case m@MenuItem(text, uri, kids, _, _, _) if m.placeholder_? =>
               Helpers.addCssClass(i.cssClass,
-                                  Elem(null, innerTag, Null, TopScope,
+                                  Elem(null, innerTag, Null, TopScope, true,
                                        // Is a placeholder useful if we don't display the kids? I say no (DCB, 20101108)
                                        <xml:group> <span>{text}</span>{buildUlLine(kids)}</xml:group>) %
                                   (if (m.path) S.prefixedAttrsToMetaData("li_path", liMap) else Null) %
@@ -149,26 +151,26 @@ object Menu extends DispatchSnippet {
 
             case MenuItem(text, uri, kids, true, _, _) if linkToSelf =>
               Helpers.addCssClass(i.cssClass,
-                                  Elem(null, innerTag, Null, TopScope,
+                                  Elem(null, innerTag, Null, TopScope, true,
                                        <xml:group> <a href={uri}>{text}</a>{ifExpandCurrent(buildUlLine(kids))}</xml:group>) %
                                   S.prefixedAttrsToMetaData("li_item", liMap))
 
             case MenuItem(text, uri, kids, true, _, _) =>
               Helpers.addCssClass(i.cssClass,
-                                  Elem(null, innerTag, Null, TopScope,
+                                  Elem(null, innerTag, Null, TopScope, true,
                                        <xml:group> <span>{text}</span>{ifExpandCurrent(buildUlLine(kids))}</xml:group>) %
                                   S.prefixedAttrsToMetaData("li_item", liMap))
 
             // Not current, but on the path, so we need to expand children to show the current one
             case MenuItem(text, uri, kids, _, true, _) =>
               Helpers.addCssClass(i.cssClass,
-                                  Elem(null, innerTag, Null, TopScope,
+                                  Elem(null, innerTag, Null, TopScope, true,
                                        <xml:group> <a href={uri}>{text}</a>{buildUlLine(kids)}</xml:group>) %
                                   S.prefixedAttrsToMetaData("li_path", liMap))
 
             case MenuItem(text, uri, kids, _, _, _) =>
               Helpers.addCssClass(i.cssClass,
-                                  Elem(null, innerTag, Null, TopScope,
+                                  Elem(null, innerTag, Null, TopScope, true,
                                        <xml:group> <a href={uri}>{text}</a>{ifExpandAll(buildUlLine(kids))}</xml:group>) % li)
           }
         }
@@ -178,7 +180,7 @@ object Menu extends DispatchSnippet {
             NodeSeq.Empty
           } else {
             if (outerTag.length > 0) {
-              Elem(null, outerTag, Null, TopScope,
+              Elem(null, outerTag, Null, TopScope, true,
                 <xml:group>{in.flatMap(buildANavItem)}</xml:group>) %
                   S.prefixedAttrsToMetaData("ul")
             } else {
@@ -224,7 +226,7 @@ object Menu extends DispatchSnippet {
               "uri" -> uri.toString,
               "children" -> buildItems(kids),
               "current" -> current,
-              "cssClass" -> (in.cssClass openOr ""),
+              "cssClass" -> Str(in.cssClass openOr ""),
               "placeholder" -> in.placeholder_?,
               "path" -> path)
     }
@@ -305,56 +307,68 @@ object Menu extends DispatchSnippet {
   }
 
   /**
-   * <p>Renders a group of menu items. You specify a group using the LocGroup LocItem
-   * case class on your Menu Loc:</p>
+   * Renders a group of menu items. You specify a group using the LocGroup LocItem
+   * case class on your Menu Loc:
    *
-   * <pre>
+   * {{{
    * val menus =
    *   Menu(Loc("a",...,...,LocGroup("test"))) ::
    *   Menu(Loc("b",...,...,LocGroup("test"))) ::
    *   Menu(Loc("c",...,...,LocGroup("test"))) :: Nil
-   * </pre>
+   * }}}
    *
-   * <p>You can then render with the group snippet:</p>
+   * You can then render with the group snippet:
    *
-   * <pre>
-   * &lt;lift:Menu.group group="test" /&gt;
-   * </pre>
+   * {{{
+   * <nav data-lift="Menu.group?group=test">
+   *   <ul>
+   *     <li>
+   *       <a href="/sample/link">Bound menu item</a>
+   *     </li>
+   *   </ul>
+   * </nav>
+   * }}}
    *
-   * <p>Each menu item is rendered as an anchor tag (&lta /&gt;), and you can customize
-   * the tag using attributes prefixed with "a":</p>
+   * By default, menu items bind the href and text of an `a` element in
+   * the template, and iterates over `li` elements. You can customize
+   * these settings using the `repeatedSelector`, `linkSelector`, and
+   * `hrefSelector` parameters; for example:
+   *.
+   * {{{
+   * <p data-lift="Menu.group?group=test&repeatedSelector=p&linkSelector=p&hrefSelector=[data-link]"
+   *    data-link="/sample/link">
+   *   Bound menu item
+   * </p>
+   * }}}
    *
-   * <pre>
-   * &lt;lift:Menu.group group="test" a:class="menulink" /&gt;
-   * </pre>
+   * These selectors are CSS selector transform selectors. `repeatedSelector`
+   * and `linkSelector` are the left-hand-side, while `hrefSelector` is the
+   * second part, which indicates what will be replaced by the href text.
+   * For example, the above would roughly yield a transform that looks like:
    *
-   * <p>You can also specify your own template within the Menu.group snippet tag, as long as
-   * you provide a &lt;menu:bind /&gt; element where the snippet can place each menu item:</p>
-   *
-   * <pre>
-   * &lt;ul&gt;
-   * &lt;lift:Menu.group group="test" &gt;
-   *   &lt;li&gt;&lt;menu:bind /&gt;&lt;/li&gt;
-   * &lt;/lift:Menu.group&gt;
-   * </pre>
-   *
+   * {{{
+   * "p" #> {
+   *   "p [data-link]" #> <menu href> &
+   *   "p *" #> <menu text> &
+   * }
+   * }}}
    */
-  def group(template: NodeSeq): NodeSeq = {
-    val toBind = if ((template \ "bind").filter(_.prefix == "menu").isEmpty)
-    <xml:group><menu:bind/> </xml:group>
-    else template
+  def group: CssSel = {
+    val repeatedSelector = S.attr("repeatedSelector") openOr "li"
+    val linkSelector = S.attr("linkSelector") openOr "a"
+    val hrefSelector = S.attr("hrefSelector") openOr "[href]"
 
-    val attrs = S.prefixedAttrsToMetaData("a")
-
-    for (group <- S.attr("group").toList;
-         siteMap <- LiftRules.siteMap.toList;
-         loc <- siteMap.locForGroup(group);
-         link <- loc.createDefaultLink;
-         linkText <- loc.linkText) yield {
-      val a = Helpers.addCssClass(loc.cssClassForMenuItem,
-                                  <a href={link}>{linkText}</a> % attrs)
-
-      Group(bind("menu", toBind, "bind" -> a))
+    repeatedSelector #> {
+      for {
+        group <- S.attr("group").toList
+        siteMap <- LiftRules.siteMap.toList
+        loc <- siteMap.locForGroup(group)
+        link <- loc.createDefaultLink
+        linkText <- loc.linkText
+      } yield {
+        s"$linkSelector $hrefSelector" #> link &
+        s"$linkSelector *" #> linkText
+      }
     }
   }
 
@@ -396,19 +410,25 @@ object Menu extends DispatchSnippet {
    * set the "donthide" attribute on the tag to force it to show text only (same text as normal,
    * but not in an anchor tag)</p>
    *
+   *
    * <p>Alternatively, you can set the "linkToSelf" attribute to "true" to force a link. You
    * can specify your own link text with the tag's contents. Note that <b>case is significant</b>, so
    * make sure you specify "linkToSelf" and not "linktoself".</p>
    *
    */
-  def item(text: NodeSeq): NodeSeq = {
+  def item(_text: NodeSeq): NodeSeq = {
     val donthide = S.attr("donthide").map(Helpers.toBoolean) openOr false
     val linkToSelf = (S.attr("linkToSelf") or S.attr("linktoself")).map(Helpers.toBoolean) openOr false
+
+    val text = ("a" #> ((n: NodeSeq) => n match {
+      case e: Elem => e.child
+      case xs => xs
+    })).apply(_text)
 
     for {
       name <- S.attr("name").toList
     } yield {
-      type T = Q forSome {type Q}
+      type T = Q forSome { type Q }
 
       // Builds a link for the given loc
       def buildLink[T](loc : Loc[T]) = {

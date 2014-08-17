@@ -17,6 +17,13 @@
 package net.liftweb 
 package sitemap 
 
+// FIXME Needed to due to https://issues.scala-lang.org/browse/SI-6541,
+// which causes existential types to be inferred for the generated
+// unapply of a case class with a wildcard parameterized type.
+// Ostensibly should be fixed in 2.12, which means we're a ways away
+// from being able to remove this, though.
+import scala.language.existentials
+
 import scala.annotation._
 import net.liftweb.http._
 import net.liftweb.common._
@@ -168,8 +175,6 @@ object Menu extends MenuSingleton {
      * the well typed currentValue
      */
     lazy val toLoc: Loc[T] = new Loc[T] with ParamExtractor[String, T] {
-      import scala.xml._
-
       def headMatch: Boolean = ParamMenuable.this.headMatch
       
       // the name of the page
@@ -621,7 +626,7 @@ case class Menu(loc: Loc[_], private val convertableKids: ConvertableToMenu*) ex
   }
 
   def makeMenuItem(path: List[Loc[_]]): Box[MenuItem] =
-    loc.buildItem(kids.toList.flatMap(_.makeMenuItem(path)) ::: loc.supplimentalKidMenuItems, _lastInPath(path), _inPath(path))
+    loc.buildItem(kids.toList.flatMap(_.makeMenuItem(path)) ::: loc.supplementalKidMenuItems, _lastInPath(path), _inPath(path))
 
   /**
    * Make a menu item only of the current loc is in the given group

@@ -58,6 +58,10 @@ object Templates {
         }
     }
 
+  private [http] def findTopLevelTemplate(places: List[String], locale: Locale, needAutoSurround: Boolean) = {
+    findRawTemplate0(places, locale, needAutoSurround).map(checkForContentId)
+  }
+
   /**
    * Given a list of paths (e.g. List("foo", "index")),
    * find the template.  This method runs checkForContentId
@@ -83,29 +87,6 @@ object Templates {
    */
   def apply(places: List[String], locale: Locale): Box[NodeSeq] = 
     findRawTemplate(places, locale).map(checkForContentId)
-
-  /**
-   * Given a list of paths (e.g. List("foo", "index")),
-   * find the template.
-   * @param places - the path to look in
-   *
-   * @return the template if it can be found
-   */
-  @deprecated("use apply", "2.4")
-  def findAnyTemplate(places: List[String]): Box[NodeSeq] =
-    findRawTemplate(places, S.locale)
-
-  /**
-   * Given a list of paths (e.g. List("foo", "index")),
-   * find the template.
-   * @param places - the path to look in
-   * @param locale - the locale of the template to search for
-   *
-   * @return the template if it can be found
-   */
-  @deprecated("use apply", "2.4")
-  def findAnyTemplate(places: List[String], locale: Locale): Box[NodeSeq] = findRawTemplate(places, locale)
-
 
   /**
    * Check to see if the template is marked designer friendly
@@ -153,6 +134,16 @@ object Templates {
     }.headOption getOrElse in
   }
 
+  private def parseMarkdown(is: InputStream, needAutoSurround: Boolean): Box[NodeSeq] =
+  for {
+    bytes <- Helpers.tryo(Helpers.readWholeStream(is))
+    elems <- MarkdownParser.parse(new String(bytes, "UTF-8"))
+  } yield {
+    if (needAutoSurround)
+      <lift:surround with="default" at="content">{elems}</lift:surround>
+    else
+      elems
+  }
 
   /**
    * Given a list of paths (e.g. List("foo", "index")),
@@ -163,6 +154,10 @@ object Templates {
    * @return the template if it can be found
    */
   def findRawTemplate(places: List[String], locale: Locale): Box[NodeSeq] = {
+    findRawTemplate0(places, locale, false)
+  }
+
+  private def findRawTemplate0(places: List[String], locale: Locale, needAutoSurround: Boolean): Box[NodeSeq] = {
     /*
      From a Scala coding standpoint, this method is ugly.  It's also a performance
      hotspot that needed some tuning.  I've made the code very imperative and
@@ -214,7 +209,9 @@ object Templates {
                 val name = pls + p + (if (s.length > 0) "." + s else "")
                 import scala.xml.dtd.ValidationException
                 val xmlb = try {
-                  LiftRules.doWithResource(name) { parserFunction } match {
+                  LiftRules.doWithResource(name) { is =>
+                    if (s == "md") {parseMarkdown(is, needAutoSurround)} else
+                    parserFunction(is) } match {
                     case Full(seq) => seq
                     case _ => Empty
                   }
@@ -300,15 +297,6 @@ object Templates {
 }
 
 /**
-* A case class that contains the information necessary to set up a CometActor
-*/
-final case class CometCreationInfo(contType: String,
-                                   name: Box[String],
-                                   defaultXml: NodeSeq,
-                                   attributes: Map[String, String],
-                                   session: LiftSession)
-
-/**
  * Throw this exception if there's a catostrophic failure executing
  * a snippet
  */
@@ -351,6 +339,12 @@ class StateInStatelessException(msg: String) extends SnippetFailureException(msg
 }
 
 
+  // FIXME Needed to due to https://issues.scala-lang.org/browse/SI-6541,
+  // which causes existential types to be inferred for the generated
+  // unapply of a case class with a wildcard parameterized type.
+  // Ostensibly should be fixed in 2.12, which means we're a ways away
+  // from being able to remove this, though.
+  import scala.language.existentials
 
   /**
    * Holds a pair of parameters

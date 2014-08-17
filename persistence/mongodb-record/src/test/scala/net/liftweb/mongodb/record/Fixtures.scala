@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,15 +25,19 @@ import common._
 import json._
 import json.ext.{EnumSerializer, JsonBoxSerializer}
 import http.SHtml
-import util.FieldError
+import util.{FieldError, Helpers}
 
 import java.math.MathContext
+import java.util.{Date, UUID}
+import java.util.regex.Pattern
 import scala.xml.Text
 
 import net.liftweb.record._
 import net.liftweb.record.field._
+import net.liftweb.record.field.joda._
 
 import org.bson.types.ObjectId
+import org.joda.time.DateTime
 
 object MyTestEnum extends Enumeration {
   val ONE = Value("ONE")
@@ -132,7 +136,9 @@ class FieldTypeTestRecord private () extends MongoRecord[FieldTypeTestRecord] wi
   object legacyOptionalTimeZoneField extends TimeZoneField(this) { override def optional_? = true }
   object optionalTimeZoneField extends OptionalTimeZoneField(this)
 
-  def dirtyFields = this.allFields.filter(_.dirty_?)
+  object mandatoryJodaTimeField extends JodaTimeField(this)
+  object legacyOptionalJodaTimeField extends JodaTimeField(this) { override def optional_? = true }
+  object optionalJodaTimeField extends OptionalJodaTimeField(this)
 }
 
 object FieldTypeTestRecord extends FieldTypeTestRecord with MongoMetaRecord[FieldTypeTestRecord]
@@ -225,8 +231,6 @@ class MongoFieldTypeTestRecord private () extends MongoRecord[MongoFieldTypeTest
   object mandatoryMongoCaseClassField extends MongoCaseClassField[MongoFieldTypeTestRecord, MongoCaseClassTestObject](this) {
     override def formats = owner.meta.formats
   }
-
-  def dirtyFields = this.allFields.filter(_.dirty_?)
 }
 
 object MongoFieldTypeTestRecord extends MongoFieldTypeTestRecord with MongoMetaRecord[MongoFieldTypeTestRecord] {
@@ -242,8 +246,6 @@ class PatternFieldTestRecord private () extends MongoRecord[PatternFieldTestReco
   object legacyOptionalPatternField extends PatternField(this) { override def optional_? = true }
 
   override def equals(other: Any): Boolean = equalsWithPatternCheck(other)
-
-  def dirtyFields = this.allFields.filter(_.dirty_?)
 }
 
 object PatternFieldTestRecord extends PatternFieldTestRecord with MongoMetaRecord[PatternFieldTestRecord] {
@@ -263,18 +265,36 @@ class ListTestRecord private () extends MongoRecord[ListTestRecord] with UUIDPk[
   def meta = ListTestRecord
 
   object mandatoryStringListField extends MongoListField[ListTestRecord, String](this)
+  object mandatoryMongoRefListField extends ObjectIdRefListField(this, FieldTypeTestRecord)
   object mandatoryIntListField extends MongoListField[ListTestRecord, Int](this)
   object mandatoryMongoJsonObjectListField extends MongoJsonObjectListField(this, TypeTestJsonObject)
   object mongoCaseClassListField extends MongoCaseClassListField[ListTestRecord, MongoCaseClassTestObject](this) {
     override def formats = owner.meta.formats
   }
-
-  // TODO: More List types
-
-  def dirtyFields = this.allFields.filter(_.dirty_?)
 }
 object ListTestRecord extends ListTestRecord with MongoMetaRecord[ListTestRecord] {
   override def formats = allFormats + new EnumSerializer(MyTestEnum)
+}
+
+class MongoListTestRecord private () extends MongoRecord[MongoListTestRecord] with UUIDPk[MongoListTestRecord] {
+  def meta = MongoListTestRecord
+
+  object objectIdRefListField extends ObjectIdRefListField(this, FieldTypeTestRecord)
+  object patternListField extends MongoListField[MongoListTestRecord, Pattern](this)
+  object dateListField extends MongoListField[MongoListTestRecord, Date](this)
+  object uuidListField extends MongoListField[MongoListTestRecord, UUID](this)
+}
+object MongoListTestRecord extends MongoListTestRecord with MongoMetaRecord[MongoListTestRecord] {
+  override def formats = DefaultFormats.lossless + new ObjectIdSerializer + new PatternSerializer + new DateSerializer
+}
+
+class MongoJodaListTestRecord private () extends MongoRecord[MongoJodaListTestRecord] with UUIDPk[MongoJodaListTestRecord] {
+  def meta = MongoJodaListTestRecord
+
+  object dateTimeListField extends MongoListField[MongoJodaListTestRecord, DateTime](this)
+}
+object MongoJodaListTestRecord extends MongoJodaListTestRecord with MongoMetaRecord[MongoJodaListTestRecord] {
+  override def formats = DefaultFormats.lossless + new DateTimeSerializer
 }
 
 class MapTestRecord private () extends MongoRecord[MapTestRecord] with StringPk[MapTestRecord] {
@@ -284,8 +304,6 @@ class MapTestRecord private () extends MongoRecord[MapTestRecord] with StringPk[
   object mandatoryIntMapField extends MongoMapField[MapTestRecord, Int](this)
 
   // TODO: More Map types, including JsonObject (will require a new Field type)
-
-  def dirtyFields = this.allFields.filter(_.dirty_?)
 }
 object MapTestRecord extends MapTestRecord with MongoMetaRecord[MapTestRecord] {
   override def formats = allFormats
@@ -348,8 +366,6 @@ class SubRecordTestRecord private () extends MongoRecord[SubRecordTestRecord] wi
   object legacyOptionalBsonRecordListField extends BsonRecordListField(this, SubRecord) {
     override def optional_? = true
   }
-
-  def dirtyFields = this.allFields.filter(_.dirty_?)
 }
 object SubRecordTestRecord extends SubRecordTestRecord with MongoMetaRecord[SubRecordTestRecord] {
   override def formats = allFormats
@@ -428,3 +444,11 @@ class JObjectFieldTestRecord private () extends MongoRecord[JObjectFieldTestReco
 object JObjectFieldTestRecord extends JObjectFieldTestRecord with MongoMetaRecord[JObjectFieldTestRecord] {
   override def formats = allFormats
 }
+
+class CustomFieldName private () extends MongoRecord[CustomFieldName] with ObjectIdPk[CustomFieldName] {
+  def meta = CustomFieldName
+
+  object customField extends StringField(this, 256)
+}
+
+object CustomFieldName extends CustomFieldName with MongoMetaRecord[CustomFieldName]

@@ -80,9 +80,7 @@ object LazyLoad extends DispatchSnippet {
                                      attributes,
                                      session) => {
                 val ret = new AsyncRenderComet()
-                ret.initCometActor(session,
-                                   Full(theType),
-                                   name, defaultXml, attributes)
+                ret.initCometActor(ccinfo)
                 ret ! PerformSetupComet2(if (ret.sendInitialReq_?) 
        S.request.map(_.snapshot) else Empty)
                 
@@ -134,25 +132,20 @@ private case class Render(js: JsCmd)
  */
 class AsyncRenderComet extends CometActor {
 
-  override def lifespan: Box[TimeSpan] = Full(90 seconds)
+  override def lifespan: Box[TimeSpan] = Full(90.seconds)
 
   def render = NodeSeq.Empty
 
   // make this method visible so that we can initialize the actor
-  override def initCometActor(theSession: LiftSession,
-                               theType: Box[String],
-                               name: Box[String],
-                               defaultXml: NodeSeq,
-                               attributes: Map[String, String]) {
-    super.initCometActor(theSession, theType, name, defaultXml,
-                         attributes)
+  override def initCometActor(creationInfo: CometCreationInfo) {
+    super.initCometActor(creationInfo)
   }
 
 
   override def lowPriority : PartialFunction[Any, Unit] = {
     // farm the request off to another thread
     case Ready(js) => 
-      Schedule.schedule(() => this ! Render(js()), 0 seconds)
+      Schedule.schedule(() => this ! Render(js()), 0.seconds)
 
     // render it
     case Render(js) => 

@@ -32,12 +32,9 @@ import scala.xml._
  */
 
 object Helpers extends TimeHelpers with StringHelpers with ListHelpers
-with SecurityHelpers with BindHelpers with HttpHelpers
+with SecurityHelpers with HtmlHelpers with HttpHelpers
 with IoHelpers with BasicTypesHelpers
 with ClassHelpers with ControlHelpers
-{
-
-}
 
 /**
  * Used for type-safe pattern matching of an Any and returns a Seq[Node]
@@ -57,4 +54,6 @@ object SafeNodeSeq {
 /**
  * The superclass for all Lift flow of control exceptions
  */
-class LiftFlowOfControlException(msg: String) extends RuntimeException(msg)
+class LiftFlowOfControlException(msg: String) extends RuntimeException(msg) {
+  override def fillInStackTrace = this
+}

@@ -33,7 +33,7 @@ object UserAgentCalculator extends Factory {
   /**
    * The default regular expression for IE
    */
-  val iePattern = """MSIE ([0-9]+)""".r
+  val iePattern = """(MSIE ([0-9]+)|Trident/7.*rv:([0-9]+))""".r
 
   /**
    * You can change the mechanism by which the user agent for IE
@@ -47,9 +47,11 @@ object UserAgentCalculator extends Factory {
    */
   def defaultIeCalcFunction(userAgent: Box[String]): Box[Double] = 
     for {
-      ua <- userAgent
-      m = iePattern.pattern.matcher(ua)
-      ver <- if (m.find) Helpers.asDouble(m.group(1)) else Empty
+      userAgent <- userAgent
+      ieMatch = iePattern.pattern.matcher(userAgent)
+      findResult = ieMatch.find if findResult
+      ieVersionString <- Box.legacyNullTest(ieMatch.group(2)) or Box.legacyNullTest(ieMatch.group(3))
+      ver <- Helpers.asDouble(ieVersionString)
     } yield ver
 
   /**
@@ -143,7 +145,9 @@ trait UserAgentCalculator {
   lazy val isIE7: Boolean = ieVersion.map(_ == 7) openOr false
   lazy val isIE8: Boolean = ieVersion.map(_ == 8) openOr false
   lazy val isIE9: Boolean = ieVersion.map(_ == 9) openOr false
-  lazy val isIE = ieVersion.map(_ >= 6) openOr false
+  lazy val ieIE10: Boolean = ieVersion.map(_ == 10) openOr false
+  lazy val isIE11: Boolean = ieVersion.map(_ == 11) openOr false
+  lazy val isIE = ieVersion.isDefined
 
   lazy val safariVersion: Box[Int] = 
     UserAgentCalculator.safariCalcFunction.vend.apply(userAgent).map(_.toInt)
@@ -461,8 +465,8 @@ object Req {
                       Nil, 
                       Full(BodyOrInputStream(request.inputStream)))
         // it's multipart
-      } else if (request multipartContent_?) {
-        val allInfo = request extractFiles
+      } else if (request.multipartContent_?) {
+        val allInfo = request.extractFiles
         
         val normal: List[NormalParamHolder] = 
           allInfo.flatMap {
@@ -489,11 +493,11 @@ object Req {
         val params = localParams ++ (request.params.sortWith
                                      {(s1, s2) => s1.name < s2.name}).
                                            map(n => (n.name, n.values))
-        ParamCalcInfo(request paramNames, params, Nil, Empty)
+        ParamCalcInfo(request.paramNames, params, Nil, Empty)
       } else {
         ParamCalcInfo(queryStringParam._1, 
                       queryStringParam._2 ++ localParams, 
-                      Nil, Full(BodyOrInputStream(request inputStream)))
+                      Nil, Full(BodyOrInputStream(request.inputStream)))
       }
     })
 
@@ -544,6 +548,7 @@ object Req {
   private def _fixHref(contextPath: String, v: Seq[Node], fixURL: Boolean, rewrite: Box[String => String]): Text = {
     val hv = v.text
     val updated = if (hv.startsWith("/") &&
+                      !hv.startsWith("//") &&
                       !LiftRules.excludePathFromContextPathRewriting.vend(hv)) contextPath + hv else hv
 
     Text(if (fixURL && rewrite.isDefined &&
@@ -551,6 +556,7 @@ object Req {
              !updated.startsWith("javascript:") &&
              !updated.startsWith("http://") &&
              !updated.startsWith("https://") &&
+             !updated.startsWith("//") &&
              !updated.startsWith("#"))
          rewrite.openOrThrowException("legacy code").apply(updated) else updated)
   }
@@ -573,11 +579,11 @@ object Req {
         v =>
         v match {
           case Group(nodes) => Group(_fixHtml(contextPath, nodes))
-          case e: Elem if e.label == "form" => Elem(v.prefix, v.label, fixAttrs("action", v.attributes, true), v.scope, _fixHtml(contextPath, v.child): _*)
-          case e: Elem if e.label == "script" => Elem(v.prefix, v.label, fixAttrs("src", v.attributes, false), v.scope, _fixHtml(contextPath, v.child): _*)
-          case e: Elem if e.label == "a" => Elem(v.prefix, v.label, fixAttrs("href", v.attributes, true), v.scope, _fixHtml(contextPath, v.child): _*)
-          case e: Elem if e.label == "link" => Elem(v.prefix, v.label, fixAttrs("href", v.attributes, false), v.scope, _fixHtml(contextPath, v.child): _*)
-          case e: Elem => Elem(v.prefix, v.label, fixAttrs("src", v.attributes, true), v.scope, _fixHtml(contextPath, v.child): _*)
+          case e: Elem if e.label == "form" => Elem(v.prefix, v.label, fixAttrs("action", v.attributes, true), v.scope, e.minimizeEmpty, _fixHtml(contextPath, v.child): _*)
+          case e: Elem if e.label == "script" => Elem(v.prefix, v.label, fixAttrs("src", v.attributes, false), v.scope, e.minimizeEmpty, _fixHtml(contextPath, v.child): _*)
+          case e: Elem if e.label == "a" => Elem(v.prefix, v.label, fixAttrs("href", v.attributes, true), v.scope, e.minimizeEmpty, _fixHtml(contextPath, v.child): _*)
+          case e: Elem if e.label == "link" => Elem(v.prefix, v.label, fixAttrs("href", v.attributes, false), v.scope, e.minimizeEmpty, _fixHtml(contextPath, v.child): _*)
+          case e: Elem => Elem(v.prefix, v.label, fixAttrs("src", v.attributes, true), v.scope, e.minimizeEmpty, _fixHtml(contextPath, v.child): _*)
           case _ => v
         }
       }
@@ -587,7 +593,7 @@ object Req {
 
   private[liftweb] def defaultCreateNotFound(in: Req) =
   XhtmlResponse((<html> <body>The Requested URL {in.contextPath + in.uri} was not found on this server</body> </html>),
-                LiftRules.docType.vend(in), List("Content-Type" -> "text/html; charset=utf-8"), Nil, 404, S.ieMode)
+                LiftRules.htmlProperties.vend(in).docType, List("Content-Type" -> "text/html; charset=utf-8"), Nil, 404, S.legacyIeCompatibilityMode)
 
   def unapply(in: Req): Option[(List[String], String, RequestType)] = Some((in.path.partPath, in.path.suffix, in.requestType))
 }
@@ -862,7 +868,7 @@ class Req(val path: ParsePath,
    * A request that is neither Ajax or Comet
    */
   lazy val standardRequest_? : Boolean = path.partPath match {
-    case x :: _ if x == LiftRules.ajaxPath || x == LiftRules.cometPath => false
+    case x :: _ if x == LiftRules.liftContextRelativePath => false
     case _ => true
   }
 
@@ -912,7 +918,7 @@ class Req(val path: ParsePath,
   lazy val headers: List[(String, String)] =
   for (h <- request.headers;
        p <- h.values
-  ) yield (h name, p)
+  ) yield (h.name, p)
 
 
   def headers(name: String): List[String] = headers.filter(_._1.equalsIgnoreCase(name)).map(_._2)
@@ -978,9 +984,29 @@ class Req(val path: ParsePath,
       sid <- httpRequest.sessionId
     } yield sid
 
-  lazy val json: Box[JsonAST.JValue] = 
-    if (!json_?) Empty
-    else try {
+  /**
+   * The JValue representation of this Req's body, if the body is JSON-parsable
+   * AND the content-type of the request is JSON. Returns a Failure if
+   * the request is not considered a JSON request (see json_?), or if
+   * there was an error parsing the JSON.
+   *
+   * If you want to forcibly evaluate the request body as JSON, ignoring
+   * content type, see `forcedBodyAsJson`.
+   */
+  lazy val json: Box[JsonAST.JValue] = {
+    if (!json_?) {
+      Failure("Cannot parse non-JSON request as JSON; please check content-type.")
+    } else {
+      forcedBodyAsJson
+    }
+  }
+
+  /**
+   * Forcibly tries to parse the request body as JSON. Does not perform any
+   * content type checks, unlike the json method.
+   */
+  lazy val forcedBodyAsJson: Box[JsonAST.JValue] = {
+    try {
       import java.io._
 
       def r = """; *charset=(.*)""".r
@@ -996,6 +1022,7 @@ class Req(val path: ParsePath,
       case e: LiftFlowOfControlException => throw e
       case e: Exception => Failure(e.getMessage, Full(e), Empty)
     }
+  }
 
   private def containerRequest = Box !! request
     /**
@@ -1016,9 +1043,28 @@ class Req(val path: ParsePath,
       case (sch, port) => sch + "://" + r.serverName + ":" + port + contextPath
     }) openOr ""
 
+  /**
+   * The Elem representation of this Req's body, if the body is XML-parsable
+   * AND the content-type of the request is XML. Returns a Failure if
+   * the request is not considered a XML request (see xml_?), or if
+   * there was an error parsing the XML.
+   *
+   * If you want to forcibly evaluate the request body as XML, ignoring
+   * content type, see `forcedBodyAsXml`.
+   */
+  lazy val xml: Box[Elem] = {
+    if (!xml_?) {
+      Failure("Cannot parse non-XML request as XML; please check content-type.")
+    } else  {
+      forcedBodyAsXml
+    }
+  }
 
-  lazy val xml: Box[Elem] = if (!xml_?) Empty
-  else 
+  /**
+   * Forcibly tries to parse the request body as XML. Does not perform any
+   * content type checks, unlike the xml method.
+   */
+  lazy val forcedBodyAsXml: Box[Elem] = {
     try {
       import java.io._
       body.map(b => XML.load(new ByteArrayInputStream(b)))
@@ -1026,6 +1072,7 @@ class Req(val path: ParsePath,
       case e: LiftFlowOfControlException => throw e
       case e: Exception => Failure(e.getMessage, Full(e), Empty)
     }
+  }
 
   /**
    * The SiteMap Loc associated with this Req
@@ -1120,11 +1167,13 @@ class Req(val path: ParsePath,
         this))
     }
   
-  def post_? = requestType.post_?
+  val post_? = requestType.post_?
 
-  def get_? = requestType.get_?
+  val get_? = requestType.get_?
 
-  def put_? = requestType.put_?
+  val put_? = requestType.put_?
+
+  val options_? = requestType.options_?
 
   def fixHtml(in: NodeSeq): NodeSeq = Req.fixHtml(contextPath, in)
 
@@ -1280,5 +1329,5 @@ object URLRewriter {
     }
   }
 
-  def rewriteFunc: Box[(String) => String] = Box.legacyNullTest(funcHolder value)
+  def rewriteFunc: Box[(String) => String] = Box.legacyNullTest(funcHolder.value)
 }

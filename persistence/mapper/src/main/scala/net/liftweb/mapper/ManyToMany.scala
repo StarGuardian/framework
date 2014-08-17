@@ -17,6 +17,8 @@
 package net.liftweb
 package mapper
 
+import scala.language.existentials
+
 import net.liftweb.util._
 import net.liftweb.common._
 
@@ -27,8 +29,8 @@ import net.liftweb.common._
 trait ManyToMany extends BaseKeyedMapper {
   this: KeyedMapper[_, _] =>
 
-  type K = TheKeyType
-  type T = KeyedMapperType
+  private[this] type K = TheKeyType
+  private[this] type T = KeyedMapperType
 
   private var manyToManyFields: List[MappedManyToMany[_,_,_]] = Nil
 
@@ -88,7 +90,7 @@ trait ManyToMany extends BaseKeyedMapper {
     refresh
     manyToManyFields ::= this
 
-    protected def isJoinForChild(e: T2)(join: O) = otherField.actualField(join).is == e.primaryKeyField.is
+    protected def isJoinForChild(e: T2)(join: O) = otherField.actualField(join).get == e.primaryKeyField.get
     protected def joinForChild(e: T2): Option[O] =
       joins.find(isJoinForChild(e))
 
@@ -96,7 +98,7 @@ trait ManyToMany extends BaseKeyedMapper {
       joinForChild(e) match {
         case None =>
           removedJoins.find { // first check if we can recycle a removed join
-            otherField.actualField(_).is == e.primaryKeyField
+            otherField.actualField(_).get == e.primaryKeyField
           } match {
             case Some(removedJoin) =>
               removedJoins = removedJoins filter removedJoin.ne
@@ -104,7 +106,7 @@ trait ManyToMany extends BaseKeyedMapper {
             case None =>
               val newJoin = joinMeta.create
               thisField.actualField(newJoin) match {
-                case mfk: MappedForeignKey[K,O,T] => mfk.set(primaryKeyField.is.asInstanceOf[K])
+                case mfk: MappedForeignKey[K,O,T] => mfk.set(primaryKeyField.get.asInstanceOf[K])
               }
               otherFK(newJoin)(_.apply(e))
               newJoin
@@ -138,7 +140,7 @@ trait ManyToMany extends BaseKeyedMapper {
     protected def childAt(n: Int) = children(n)
     def apply(n: Int) = childAt(n)
     def indexOf(e: T2) =
-      children.indexWhere(e eq)
+      children.indexWhere(e.eq)
 
     def insertAll(n: Int, traversable: Traversable[T2]) {
       val ownedJoins = traversable map own
@@ -189,7 +191,7 @@ trait ManyToMany extends BaseKeyedMapper {
      * Discard the cached state of this MappedManyToMany's children and reinitialize it from the database
      */
     def refresh = {
-      val by = new Cmp[O, TheKeyType](thisField, OprEnum.Eql, Full(primaryKeyField.is.asInstanceOf[K]), Empty, Empty)
+      val by = new Cmp[O, TheKeyType](thisField, OprEnum.Eql, Full(primaryKeyField.get.asInstanceOf[K]), Empty, Empty)
 
       _joins = joinMeta.findAll( (by :: qp.toList): _*)
       all
@@ -207,10 +209,10 @@ trait ManyToMany extends BaseKeyedMapper {
      */
     def save = {
       _joins = joins.filter { join =>
-        otherFK(join)(f => f.is != f.defaultValue)
+        otherFK(join)(f => f.get != f.defaultValue)
       }
       _joins foreach {
-        thisField.actualField(_).asInstanceOf[MappedForeignKey[K,O,X] forSome {type X <: KeyedMapper[K,X]}] set ManyToMany.this.primaryKeyField.is.asInstanceOf[K]
+        thisField.actualField(_).asInstanceOf[MappedForeignKey[K,O,X] forSome {type X <: KeyedMapper[K,X]}] set ManyToMany.this.primaryKeyField.get.asInstanceOf[K]
       }
 
       removedJoins.forall {_.delete_!} & ( // continue saving even if deleting fails

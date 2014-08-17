@@ -50,11 +50,6 @@ trait JsonRec[BaseRecord <: GenericRecord[BaseRecord, FieldType, MetaType] with 
   /** Encode this record instance as a JObject */
   def asJValue: JObject = meta.asJValue(this) 
   
-  /**
-   * Sets the fields of this Record from the given JSON.
-   */
-  def setFieldsFromJSON(json: String): Box[Unit] = meta.setFieldsFromJSON(this, json)
-
   /** Set the fields of this record from the given JValue */
   def setFieldsFromJValue(jvalue: JValue): Box[Unit] = meta.setFieldsFromJValue(this, jvalue)
 
@@ -172,6 +167,8 @@ trait GenericRecord[MyType <: GenericRecord[MyType, FieldType, MetaType], FieldT
   }
 
   def copy: MyType = meta.copy(this)
+
+  def dirty_? : Boolean = meta.dirty_?(this)
 }
 
 trait Record[MyType <: Record[MyType]] extends GenericRecord[MyType, Field[_, MyType], MetaRecord[MyType]] with JsonRec[MyType, Field[_, MyType], MetaRecord[MyType]]{

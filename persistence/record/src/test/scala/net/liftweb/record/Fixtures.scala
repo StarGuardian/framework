@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2012 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,14 @@ import util.{FieldError, Helpers}
 import org.specs2.mutable._
 
 import field._
+import field.joda._
 
 class BasicTestRecord private () extends Record[BasicTestRecord] {
   def meta = BasicTestRecord
 
   object field1 extends StringField(this,10)
   object field2 extends StringField(this,10)
-  object field3 extends StringField(this,10)
+  object fieldThree extends StringField(this,10)
 }
 
 object BasicTestRecord extends BasicTestRecord with MetaRecord[BasicTestRecord] {
@@ -212,6 +213,9 @@ class FieldTypeTestRecord private () extends Record[FieldTypeTestRecord] {
   object legacyOptionalTimeZoneField extends TimeZoneField(this) { override def optional_? = true }
   object optionalTimeZoneField extends OptionalTimeZoneField(this)
 
+  object mandatoryJodaTimeField extends JodaTimeField(this)
+  object legacyOptionalJodaTimeField extends JodaTimeField(this) { override def optional_? = true }
+  object optionalJodaTimeField extends OptionalJodaTimeField(this)
 
   def fieldsToCompare = {
     fields

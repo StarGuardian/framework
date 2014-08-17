@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 WorldWide Conferencing, LLC
+ * Copyright 2012-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,18 +34,26 @@ object BuildDef extends Build {
   // Core Projects
   // -------------
   lazy val core: Seq[ProjectReference] =
-    Seq(common, actor, json, json_scalaz, json_scalaz7, json_ext, util)
+    Seq(common, actor, markdown, json, json_scalaz7, json_ext, util)
 
   lazy val common =
     coreProject("common")
       .settings(description := "Common Libraties and Utilities",
-                libraryDependencies ++= Seq(slf4j_api, logback, slf4j_log4j12))
+                libraryDependencies ++= Seq(slf4j_api, logback, slf4j_log4j12, scala_xml, scala_parser)
+      )
 
   lazy val actor =
     coreProject("actor")
         .dependsOn(common)
         .settings(description := "Simple Actor",
                   parallelExecution in Test := false)
+                  
+  lazy val markdown =
+    coreProject("markdown")
+        .settings(description := "Markdown Parser",
+                  parallelExecution in Test := false,
+                  libraryDependencies <++= scalaVersion { sv => Seq(scalatest, junit, scala_xml, scala_parser) }
+      )
 
   lazy val json =
     coreProject("json")
@@ -53,17 +61,16 @@ object BuildDef extends Build {
                   parallelExecution in Test := false,
                   libraryDependencies <++= scalaVersion { sv => Seq(scalap(sv), paranamer) })
 
-  lazy val json_scalaz =
-    coreProject("json-scalaz")
-        .dependsOn(json)
-        .settings(description := "JSON Library based on Scalaz 6",
-                  libraryDependencies <+= scalaVersion(scalaz))
+  lazy val documentationHelpers =
+    coreProject("documentation-helpers")
+        .settings(description := "Documentation Helpers")
+        .dependsOn(util)
 
   lazy val json_scalaz7 =
     coreProject("json-scalaz7")
         .dependsOn(json)
         .settings(description := "JSON Library based on Scalaz 7",
-                  libraryDependencies <+= scalaVersion(scalaz7))
+                  libraryDependencies ++= Seq(scalaz7))
 
   lazy val json_ext =
     coreProject("json-ext")
@@ -73,47 +80,44 @@ object BuildDef extends Build {
 
   lazy val util =
     coreProject("util")
-        .dependsOn(actor, json)
+        .dependsOn(actor, json, markdown)
         .settings(description := "Utilities Library",
                   parallelExecution in Test := false,
-                  libraryDependencies <++= scalaVersion {sv =>  Seq(scala_compiler(sv), joda_time, joda_convert, commons_codec, javamail, log4j, htmlparser)})
-
+                  libraryDependencies <++= scalaVersion {sv =>  Seq(scala_compiler(sv), joda_time,
+                    joda_convert, commons_codec, javamail, log4j, htmlparser)}
+                  )
 
   // Web Projects
   // ------------
   lazy val web: Seq[ProjectReference] =
-    Seq(testkit, webkit, wizard)
+    Seq(testkit, webkit)
 
   lazy val testkit =
     webProject("testkit")
         .dependsOn(util)
         .settings(description := "Testkit for Webkit Library",
                   libraryDependencies ++= Seq(commons_httpclient, servlet_api))
-
   lazy val webkit =
     webProject("webkit")
         .dependsOn(util, testkit % "provided")
+        .settings(libraryDependencies += mockito_all)
         .settings(yuiCompressor.Plugin.yuiSettings: _*)
         .settings(description := "Webkit Library",
                   parallelExecution in Test := false,
                   libraryDependencies <++= scalaVersion { sv =>
-                    Seq(commons_fileupload, servlet_api, specs2(sv).copy(configurations = Some("provided")), jetty6, jwebunit)
+                    Seq(commons_fileupload, rhino, servlet_api, specs2.copy(configurations = Some("provided")), jetty6,
+                      jwebunit)
                   },
-                  libraryDependencies <++= scalaVersion { case "2.10.0" => scalaactors::Nil  case _ => Nil },
                   initialize in Test <<= (sourceDirectory in Test) { src =>
                     System.setProperty("net.liftweb.webapptest.src.test.webapp", (src / "webapp").absString)
                   })
 
-  lazy val wizard =
-    webProject("wizard")
-        .dependsOn(webkit, db)
-        .settings(description := "Wizard Library")
 
 
   // Persistence Projects
   // --------------------
   lazy val persistence: Seq[ProjectReference] =
-    Seq(db, proto, jpa, mapper, record, squeryl_record, mongodb, mongodb_record, ldap)
+    Seq(db, proto, mapper, record, squeryl_record, mongodb, mongodb_record)
 
   lazy val db =
     persistenceProject("db")
@@ -123,11 +127,6 @@ object BuildDef extends Build {
   lazy val proto =
     persistenceProject("proto")
         .dependsOn(webkit)
-
-  lazy val jpa =
-    persistenceProject("jpa")
-        .dependsOn(webkit)
-        .settings(libraryDependencies ++= Seq(scalajpa, persistence_api))
 
   lazy val mapper =
     persistenceProject("mapper")
@@ -162,13 +161,6 @@ object BuildDef extends Build {
         .dependsOn(record, mongodb)
         .settings(parallelExecution in Test := false)
 
-  lazy val ldap =
-    persistenceProject("ldap")
-        .dependsOn(mapper)
-        .settings(libraryDependencies += apacheds,
-                  initialize in Test <<= (crossTarget in Test) { ct =>
-                    System.setProperty("apacheds.working.dir", (ct / "apacheds").absolutePath)
-                  })
 
   def coreProject = liftProject("core") _
   def webProject = liftProject("web") _
@@ -188,5 +180,5 @@ object BuildDef extends Build {
                 base = file(base) / module.stripPrefix(prefix))
 
   def liftProject(id: String, base: File): Project =
-    Project(id, base).settings(liftBuildSettings: _*)
+    Project(id, base).settings(liftBuildSettings: _*).settings(scalacOptions ++= List("-feature", "-language:implicitConversions"))
 }

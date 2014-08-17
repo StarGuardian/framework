@@ -20,19 +20,14 @@ package json
 import org.specs2.mutable.Specification
 
 
-/**
- * System under specification for Diff Examples.
- */
 object DiffExamples extends Specification {
-  "Diff Examples".title
-
   import MergeExamples.{scala1, scala2, lotto1, lotto2, mergedLottoResult}
 
   "Diff example" in {
     val Diff(changed, added, deleted) = scala1 diff scala2
-    changed mustEqual expectedChanges
-    added mustEqual expectedAdditions
-    deleted mustEqual expectedDeletions
+    (changed mustEqual expectedChanges) and
+      (added mustEqual expectedAdditions) and
+      (deleted mustEqual expectedDeletions)
   }
 
   val expectedChanges = parse("""
@@ -59,9 +54,9 @@ object DiffExamples extends Specification {
 
   "Lotto example" in {
     val Diff(changed, added, deleted) = mergedLottoResult diff lotto1
-    changed mustEqual JNothing
-    added mustEqual JNothing
-    deleted mustEqual lotto2
+    (changed mustEqual JNothing) and
+      (added mustEqual JNothing) and
+      (deleted mustEqual lotto2)
   }
 
   "Example from http://tlrobinson.net/projects/js/jsondiff/" in {

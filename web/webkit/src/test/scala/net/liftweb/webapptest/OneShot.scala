@@ -17,6 +17,7 @@
 package net.liftweb
 package webapptest
 
+import org.specs2.matcher.XmlMatchers
 import org.specs2.mutable.Specification
 
 import util._
@@ -26,11 +27,11 @@ import Helpers._
 
 import java.net.{URL, InetAddress}
 
-import common.Full
 import snippet.Counter
+import net.liftweb.common.Full
 
 
-object OneShot extends Specification with RequestKit {
+object OneShot extends Specification with RequestKit with XmlMatchers {
   sequential
 
   private def reachableLocalAddress = {
@@ -139,7 +140,7 @@ object OneShot extends Specification with RequestKit {
 
       for {
         resp <- get("/oneshot")
-        xml <- resp.xml
+        xml <- resp.html5AsXml
         span <- (xml \\ "span").filter(x => (x \ "@id").text == "one")
         in <- (span \\ "input")
         name <- in \ "@name"
@@ -156,7 +157,7 @@ object OneShot extends Specification with RequestKit {
 
       for {
         resp <- get("/oneshot")
-        xml <- resp.xml
+        xml <- resp.html5AsXml
         span <- (xml \\ "span").filter(x => (x \ "@id").text == "two")
         in <- (span \\ "input")
         name <- in \ "@name"
@@ -166,7 +167,7 @@ object OneShot extends Specification with RequestKit {
       }
 
 
-      Counter.x must be_==(2).when(jetty.running)
+      Counter.x must be_>=(2).when(jetty.running)
     }
   }
 

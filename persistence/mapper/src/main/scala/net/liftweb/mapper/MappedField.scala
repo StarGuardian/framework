@@ -27,7 +27,7 @@ import net.liftweb.http.js._
 import net.liftweb.common._
 import net.liftweb.json._
 import net.liftweb.util._
-
+import scala.reflect.runtime.universe._
 
 /**
  * This is the supertrait of all traits that can be mixed into a MappedField.
@@ -242,7 +242,7 @@ trait MappedNullableField[NullableFieldType <: Any,OwnerType <: Mapper[OwnerType
   */
   override final def dbNotNull_? : Boolean = false
 
-  override def toString = is.map(_.toString) openOr ""
+  override def toString = get.map(_.toString) openOr ""
 
   /**
    * Create an input field for the item
@@ -251,7 +251,7 @@ trait MappedNullableField[NullableFieldType <: Any,OwnerType <: Mapper[OwnerType
   S.fmapFunc({s: List[String] => this.setFromAny(s)}){funcName =>
     Full(appendFieldId(<input type={formInputType}
                        name={funcName}
-                       value={is match {
+                       value={get match {
                          case null => ""
                          case Full(null) => ""
                          case Full(s) => s.toString
@@ -280,6 +280,17 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
    * Should the field be ignored by the OR Mapper?
    */
   def ignoreField_? = false
+
+
+  def manifest: TypeTag[FieldType]
+
+  /**
+   * Get the source field metadata for the field
+   * @return the source field metadata for the field
+   */
+  def sourceInfoMetadata(): SourceFieldMetadata{type ST = FieldType}
+
+  def sourceFieldInfo(): SourceFieldInfo{type T = FieldType} = SourceFieldInfoRep(get, sourceInfoMetadata())
 
 
 
@@ -465,7 +476,7 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
   S.fmapFunc({s: List[String] => this.setFromAny(s)}){funcName =>
     Full(appendFieldId(<input type={formInputType}
                        name={funcName}
-                       value={is match {case null => "" case s => s.toString}}/>))
+                       value={get match {case null => "" case s => s.toString}}/>))
   }
 
   /**
@@ -527,19 +538,15 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
     val f = getField(inst, meth)
     if (func.isDefinedAt(f)) func(f)
   }
+
   /**
    * Convert the field to its "context free" type (e.g., String, Int, Long, etc.)
    * If there are no read permissions, the value will be obscured
    */
-  def is: FieldType = {
+  def get: FieldType = {
     if (safe_? || readPermission_?) i_is_!
     else i_obscure_!(i_is_!)
   }
-
-  /**
-   * An alternative getter
-   */
-  def get: FieldType = is
 
   /**
    * What value was the field's value when it was pulled from the DB?
@@ -615,7 +622,7 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
   def targetSQLType: Int
 
   override def toString : String =
-  is match {
+  get match {
     case null => ""
     case v => v.toString
   }
@@ -623,7 +630,7 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
   def validations: List[FieldType => List[FieldError]] = Nil
 
   def validate: List[FieldError] = {
-    val cv = is
+    val cv = get
     val errorRet: ListBuffer[FieldError] = new ListBuffer
 
     /*
@@ -679,8 +686,8 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
     ) && (
       other match {
         case mapped: MappedField[_, _] => this.i_is_! == mapped.i_is_!
-        case ov: AnyRef if (ov ne null) && dbFieldClass.isAssignableFrom(ov.getClass) => this.is == runFilters(ov.asInstanceOf[FieldType], setFilter)
-        case ov => this.is == ov
+        case ov: AnyRef if (ov ne null) && dbFieldClass.isAssignableFrom(ov.getClass) => this.get == runFilters(ov.asInstanceOf[FieldType], setFilter)
+        case ov => this.get == ov
       }
     )
   }
@@ -691,11 +698,6 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
   }
 
   override def asHtml: scala.xml.Node = Text(toString)
-}
-
-object MappedField {
-  @deprecated("Automatic conversion to the field's type is not safe and will be removed. Please use field.get instead", "2.5")
-  implicit def mapToType[T, A<:Mapper[A]](in : MappedField[T, A]): T = in.is
 }
 
 trait IndexedField[O] extends BaseIndexedField {

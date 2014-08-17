@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2013 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,18 +22,22 @@ import java.util.{Date, Locale, UUID}
 import java.util.regex.Pattern
 
 import org.bson.types.ObjectId
+import org.joda.time.DateTime
 import org.specs2.mutable.Specification
 import org.specs2.specification.Fragment
 
 import common._
+import http.{S, LiftSession}
 import http.js.JsExp
 import json._
 import JsonDSL._
+import util.Helpers.snakify
 
+import net.liftweb.record.RecordRules
 import net.liftweb.record.field.Countries
 
 import com.mongodb._
-import http.{S, LiftSession}
+
 
 /**
  * Systems under specification for MongoRecord.
@@ -62,15 +66,21 @@ class MongoRecordSpec extends Specification with MongoTestKit {
     }
 
     "correctly look up fields by name" in {
-      for (name <- allExpectedFieldNames) yield {
-        rec.fieldByName(name).isDefined must_== true
-      }
+      val fields =
+        allExpectedFieldNames.flatMap { name =>
+          rec.fieldByName(name)
+        }
+
+      fields.length must_== allExpectedFieldNames.length
     }
 
     "not look up fields by bogus names" in {
-      for (name <- allExpectedFieldNames) yield {
-        rec.fieldByName("x" + name + "y").isDefined must_== false
-      }
+      val fields =
+        allExpectedFieldNames.flatMap { name =>
+          rec.fieldByName("x" + name + "y")
+        }
+
+      fields.length must_== 0
     }
   }
 
@@ -174,6 +184,8 @@ class MongoRecordSpec extends Specification with MongoTestKit {
   "MongoRecord" should {
     val binData: Array[Byte] = Array(18, 19, 20)
 
+    val dt = DateTime.now.plusHours(1)
+
     val fttr = FieldTypeTestRecord.createRecord
       .mandatoryBooleanField(false)
       .mandatoryCountryField(Countries.USA)
@@ -188,6 +200,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       .mandatoryStringField("string")
       .mandatoryTextareaField("string")
       .mandatoryTimeZoneField("America/Chicago")
+      .mandatoryJodaTimeField(dt)
 
     val bftr = BinaryFieldTestRecord.createRecord
       .mandatoryBinaryField(binData)
@@ -224,6 +237,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       .mandatoryIntListField(List(4, 5, 6))
       .mandatoryMongoJsonObjectListField(List(TypeTestJsonObject(1, "jsonobj1", Map("x" -> "1")), TypeTestJsonObject(2, "jsonobj2", Map("x" -> "2"))))
       .mongoCaseClassListField(List(MongoCaseClassTestObject(1,"str",MyTestEnum.TWO)))
+      .mandatoryMongoRefListField(Nil)
 
     val ltrJson =
       ("_id" -> ("$uuid" -> ltr.id.toString)) ~
@@ -235,7 +249,8 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       )) ~
       ("mongoCaseClassListField" -> List(
         ("intField" -> 1) ~ ("stringField" -> "str") ~ ("enum" -> 1)
-      ))
+      )) ~
+      ("mandatoryMongoRefListField" -> JArray(Nil))
 
     val mtr = MapTestRecord.createRecord
       .mandatoryStringMapField(Map("a" -> "abc", "b" -> "def", "c" -> "ghi"))
@@ -313,7 +328,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       checkMongoIsRunning
 
       S.initIfUninitted(session) {
-        fttr.save
+        fttr.save()
 
         val fttrFromDb = FieldTypeTestRecord.find(fttr.id.value)
         fttrFromDb.isDefined must_== true
@@ -321,12 +336,12 @@ class MongoRecordSpec extends Specification with MongoTestKit {
           tr mustEqual fttr
         }
 
-        bftr.save
+        bftr.save()
 
         val bftrFromDb = BinaryFieldTestRecord.find(bftr.id.value)
-        bftrFromDb.isDefined must_== true
-        bftrFromDb.toList map { tr =>
-          tr mustEqual bftr
+        bftrFromDb must beLike {
+          case Full(tr) =>
+            tr mustEqual bftr
         }
       }
     }
@@ -335,7 +350,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       checkMongoIsRunning
 
       S.initIfUninitted(session) {
-        fttr.save
+        fttr.save()
         FieldTypeTestRecord.find(fttr.id.value).isDefined must_== true
         fttr.delete_!
         FieldTypeTestRecord.find(fttr.id.value) must beEmpty
@@ -343,7 +358,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
     }
 
     "save and retrieve Mongo type fields with set values" in {
-      mfttr.save
+      mfttr.save()
 
       val mfttrFromDb = MongoFieldTypeTestRecord.find(mfttr.id.value)
       mfttrFromDb.isDefined must_== true
@@ -351,7 +366,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         tr mustEqual mfttr
       }
 
-      pftr.save
+      pftr.save()
 
       val pftrFromDb = PatternFieldTestRecord.find(pftr.id.value)
       pftrFromDb.isDefined must_== true
@@ -359,7 +374,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         tr mustEqual pftr
       }
 
-      ltr.save
+      ltr.save()
 
       val ltrFromDb = ListTestRecord.find(ltr.id.value)
       ltrFromDb.isDefined must_== true
@@ -367,7 +382,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         tr mustEqual ltr
       }
 
-      mtr.save
+      mtr.save()
 
       val mtrFromDb = MapTestRecord.find(mtr.id.value)
       mtrFromDb.isDefined must_== true
@@ -375,7 +390,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         tr mustEqual mtr
       }
 
-      srtr.save
+      srtr.save()
 
       val srtrFromDb = SubRecordTestRecord.find(srtr.id.value)
       srtrFromDb.isDefined must_== true
@@ -383,9 +398,9 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         tr mustEqual srtr
       }
 
-      joftr.save
+      joftr.save()
 
-      val joftrFromDb = JObjectFieldTestRecord.find(joftr.id.is)
+      val joftrFromDb = JObjectFieldTestRecord.find(joftr.id.get)
       joftrFromDb.isDefined must_== true
       joftrFromDb foreach { tr =>
         tr must_== joftr
@@ -395,7 +410,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
 
     "save and retrieve Mongo type fields with default values" in {
       val mfttrDef = MongoFieldTypeTestRecord.createRecord
-      mfttrDef.save
+      mfttrDef.save()
 
       val mfttrFromDb = MongoFieldTypeTestRecord.find(mfttrDef.id.value)
       mfttrFromDb.isDefined must_== true
@@ -404,7 +419,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val pftrDef = PatternFieldTestRecord.createRecord
-      pftrDef.save
+      pftrDef.save()
 
       val pftrFromDb = PatternFieldTestRecord.find(pftrDef.id.value)
       pftrFromDb.isDefined must_== true
@@ -413,7 +428,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val ltrDef = ListTestRecord.createRecord
-      ltrDef.save
+      ltrDef.save()
 
       val ltrFromDb = ListTestRecord.find(ltrDef.id.value)
       ltrFromDb.isDefined must_== true
@@ -422,7 +437,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val mtrDef = MapTestRecord.createRecord
-      mtrDef.save
+      mtrDef.save()
 
       val mtrFromDb = MapTestRecord.find(mtrDef.id.value)
       mtrFromDb.isDefined must_== true
@@ -431,7 +446,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val srtrDef = SubRecordTestRecord.createRecord
-      srtrDef.save
+      srtrDef.save()
 
       val srtrFromDb = SubRecordTestRecord.find(srtrDef.id.value)
       srtrFromDb.isDefined must_== true
@@ -440,7 +455,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val joftrDef = JObjectFieldTestRecord.createRecord
-      joftrDef.save
+      joftrDef.save()
 
       val joftrFromDb = JObjectFieldTestRecord.find(joftrDef.id.value)
       joftrFromDb.isDefined must_== true
@@ -505,10 +520,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       }
 
       val joftrFromJson = JObjectFieldTestRecord.fromJsonString(compact(render(joftrJson)))
-      joftrFromJson.isDefined must_== true
-      joftrFromJson.toList map { tr =>
-        tr mustEqual joftr
-      }
+      joftrFromJson must_== Full(joftr)
     }
 
     "handle null" in {
@@ -516,27 +528,26 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       ntr.nullstring.set(null)
       ntr.jsonobjlist.set(List(JsonObj("1", null), JsonObj("2", "jsonobj2")))
 
-      ntr.save must_== ntr
+      ntr.save() must_== ntr
 
       val ntrFromDb = NullTestRecord.find(ntr.id.value)
 
-      ntrFromDb.isDefined must_== true
-
-      ntrFromDb.toList map { n =>
-        // goes in as
-        ntr.nullstring.valueBox.map(_ must beNull)
-        ntr.nullstring.value must beNull
-        // comes out as
-        n.nullstring.valueBox.map(_ must_== "")
-        n.nullstring.value must_== ""
-        // JsonObjects
-        n.jsonobjlist.value.size must_== 2
-        ntr.jsonobjlist.value.size must_== 2
-        n.jsonobjlist.value(0).id must_== ntr.jsonobjlist.value(0).id
-        n.jsonobjlist.value(0).name must beNull
-        ntr.jsonobjlist.value(0).name must beNull
-        n.jsonobjlist.value(1).id must_== ntr.jsonobjlist.value(1).id
-        n.jsonobjlist.value(1).name must_== ntr.jsonobjlist.value(1).name
+      ntrFromDb must beLike {
+        case Full(n) =>
+          // goes in as
+          ntr.nullstring.valueBox.map(_ must beNull)
+          ntr.nullstring.value must beNull
+          // comes out as
+          n.nullstring.valueBox.map(_ must_== "")
+          n.nullstring.value must_== ""
+          // JsonObjects
+          n.jsonobjlist.value.size must_== 2
+          ntr.jsonobjlist.value.size must_== 2
+          n.jsonobjlist.value(0).id must_== ntr.jsonobjlist.value(0).id
+          n.jsonobjlist.value(0).name must beNull
+          ntr.jsonobjlist.value(0).name must beNull
+          n.jsonobjlist.value(1).id must_== ntr.jsonobjlist.value(1).id
+          n.jsonobjlist.value(1).name must_== ntr.jsonobjlist.value(1).name
       }
     }
 
@@ -548,19 +559,18 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         Nil
       )
 
-      btr.save
+      btr.save()
 
       val btrFromDb = BoxTestRecord.find(btr.id.value)
 
-      btrFromDb.isDefined must_== true
-
-      btrFromDb.toList map { b =>
-        b.jsonobjlist.value.size must_== 2
-        btr.jsonobjlist.value.size must_== 2
-        val sortedList = b.jsonobjlist.value.sortWith(_.id < _.id)
-        sortedList(0).boxEmpty must_== Empty
-        sortedList(0).boxFull must_== Full("Full String1")
-        sortedList(0).boxFail must_== Failure("Failure1")
+      btrFromDb must beLike {
+        case Full(b) =>
+          b.jsonobjlist.value.size must_== 2
+          btr.jsonobjlist.value.size must_== 2
+          val sortedList = b.jsonobjlist.value.sortWith(_.id < _.id)
+          sortedList(0).boxEmpty must_== Empty
+          sortedList(0).boxFull must_== Full("Full String1")
+          sortedList(0).boxFail must_== Failure("Failure1")
       }
     }
 
@@ -569,23 +579,23 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         val ntr = NullTestRecord.createRecord
         val btr = BoxTestRecord.createRecord
 
-        fttr.save
-        ltr.save
-        mtr.save
-        ntr.save
-        btr.save
+        fttr.save()
+        ltr.save()
+        mtr.save()
+        ntr.save()
+        btr.save()
 
         val rftr = RefFieldTestRecord.createRecord
-          .mandatoryObjectIdRefField(fttr.id.is)
-          .mandatoryUUIDRefField(ltr.id.is)
-          .mandatoryStringRefField(mtr.id.is)
-          .mandatoryIntRefField(ntr.id.is)
-          .mandatoryLongRefField(btr.id.is)
-          .mandatoryObjectIdRefListField(List(fttr.id.is))
-          .mandatoryUUIDRefListField(List(ltr.id.is))
-          .mandatoryStringRefListField(List(mtr.id.is))
-          .mandatoryIntRefListField(List(ntr.id.is))
-          .mandatoryLongRefListField(List(btr.id.is))
+          .mandatoryObjectIdRefField(fttr.id.get)
+          .mandatoryUUIDRefField(ltr.id.get)
+          .mandatoryStringRefField(mtr.id.get)
+          .mandatoryIntRefField(ntr.id.get)
+          .mandatoryLongRefField(btr.id.get)
+          .mandatoryObjectIdRefListField(List(fttr.id.get))
+          .mandatoryUUIDRefListField(List(ltr.id.get))
+          .mandatoryStringRefListField(List(mtr.id.get))
+          .mandatoryIntRefListField(List(ntr.id.get))
+          .mandatoryLongRefListField(List(btr.id.get))
 
         // single objects
         rftr.mandatoryObjectIdRefField.obj mustEqual Full(fttr)
@@ -594,10 +604,10 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         rftr.mandatoryIntRefField.obj mustEqual Full(ntr)
         rftr.mandatoryLongRefField.obj mustEqual Full(btr)
 
-        val fttr2 = FieldTypeTestRecord.createRecord.save
+        val fttr2 = FieldTypeTestRecord.createRecord.save()
 
         rftr.mandatoryObjectIdRefField.cached_? mustEqual true
-        rftr.mandatoryObjectIdRefField(fttr2.id.is)
+        rftr.mandatoryObjectIdRefField(fttr2.id.get)
         rftr.mandatoryObjectIdRefField.cached_? mustEqual false
         rftr.mandatoryObjectIdRefField.find mustEqual Full(fttr2)
         rftr.mandatoryObjectIdRefField.obj mustEqual Full(fttr2)
@@ -610,11 +620,11 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         rftr.mandatoryIntRefListField.objs mustEqual List(ntr)
         rftr.mandatoryLongRefListField.objs mustEqual List(btr)
 
-        val fttr3 = FieldTypeTestRecord.createRecord.save
+        val fttr3 = FieldTypeTestRecord.createRecord.save()
         val objList = List(fttr2, fttr3)
 
         rftr.mandatoryObjectIdRefListField.cached_? mustEqual true
-        rftr.mandatoryObjectIdRefListField(objList.map(_.id.is))
+        rftr.mandatoryObjectIdRefListField(objList.map(_.id.get))
         rftr.mandatoryObjectIdRefListField.cached_? mustEqual false
         rftr.mandatoryObjectIdRefListField.findAll mustEqual objList
         rftr.mandatoryObjectIdRefListField.objs mustEqual objList
@@ -634,58 +644,57 @@ class MongoRecordSpec extends Specification with MongoTestKit {
 
         val recFromDb = FieldTypeTestRecord.find(missingFieldDocId)
 
-        recFromDb.isDefined must_== true
-
-        recFromDb.toList map { r =>
-          r.mandatoryBooleanField.is must_== false
-          r.legacyOptionalBooleanField
-          r.optionalBooleanField.is must beEmpty
-          r.mandatoryCountryField.is must_== Countries.C1
-          r.legacyOptionalCountryField.valueBox must beEmpty
-          r.optionalCountryField.is must beEmpty
-          r.mandatoryDecimalField.is must_== 0.00
-          r.legacyOptionalDecimalField.valueBox must beEmpty
-          r.optionalDecimalField.is must beEmpty
-          r.mandatoryDoubleField.is must_== 0d
-          r.legacyOptionalDoubleField.valueBox must beEmpty
-          r.optionalDoubleField.is must beEmpty
-          r.mandatoryEmailField.is must_== ""
-          r.legacyOptionalEmailField.valueBox must beEmpty
-          r.optionalEmailField.is must beEmpty
-          r.mandatoryEnumField.is must_== MyTestEnum.ONE
-          r.legacyOptionalEnumField.valueBox must beEmpty
-          r.optionalEnumField.is must beEmpty
-          r.mandatoryIntField.is must_== 0
-          r.legacyOptionalIntField.valueBox must beEmpty
-          r.optionalIntField.is must beEmpty
-          r.mandatoryLocaleField.is must_== Locale.getDefault.toString
-          r.legacyOptionalLocaleField.valueBox must beEmpty
-          r.optionalLocaleField.is must beEmpty
-          r.mandatoryLongField.is must_== 0L
-          r.legacyOptionalLongField.valueBox must beEmpty
-          r.optionalLongField.is must beEmpty
-          r.mandatoryPostalCodeField.is must_== ""
-          r.legacyOptionalPostalCodeField.valueBox must beEmpty
-          r.optionalPostalCodeField.is must beEmpty
-          r.mandatoryStringField.is must_== ""
-          r.legacyOptionalStringField.valueBox must beEmpty
-          r.optionalStringField.is must beEmpty
-          r.mandatoryTextareaField.is must_== ""
-          r.legacyOptionalTextareaField.valueBox must beEmpty
-          r.optionalTextareaField.is must beEmpty
-          // r.mandatoryTimeZoneField.is must_== "America/Chicago"
-          r.legacyOptionalTimeZoneField.valueBox must beEmpty
-          r.optionalTimeZoneField.is must beEmpty
+        recFromDb must beLike {
+          case Full(r) =>
+            r.mandatoryBooleanField.get must_== false
+            r.legacyOptionalBooleanField
+            r.optionalBooleanField.get must beEmpty
+            r.mandatoryCountryField.get must_== Countries.C1
+            r.legacyOptionalCountryField.valueBox must beEmpty
+            r.optionalCountryField.get must beEmpty
+            r.mandatoryDecimalField.get must_== 0.00
+            r.legacyOptionalDecimalField.valueBox must beEmpty
+            r.optionalDecimalField.get must beEmpty
+            r.mandatoryDoubleField.get must_== 0d
+            r.legacyOptionalDoubleField.valueBox must beEmpty
+            r.optionalDoubleField.get must beEmpty
+            r.mandatoryEmailField.get must_== ""
+            r.legacyOptionalEmailField.valueBox must beEmpty
+            r.optionalEmailField.get must beEmpty
+            r.mandatoryEnumField.get must_== MyTestEnum.ONE
+            r.legacyOptionalEnumField.valueBox must beEmpty
+            r.optionalEnumField.get must beEmpty
+            r.mandatoryIntField.get must_== 0
+            r.legacyOptionalIntField.valueBox must beEmpty
+            r.optionalIntField.get must beEmpty
+            r.mandatoryLocaleField.get must_== Locale.getDefault.toString
+            r.legacyOptionalLocaleField.valueBox must beEmpty
+            r.optionalLocaleField.get must beEmpty
+            r.mandatoryLongField.get must_== 0L
+            r.legacyOptionalLongField.valueBox must beEmpty
+            r.optionalLongField.get must beEmpty
+            r.mandatoryPostalCodeField.get must_== ""
+            r.legacyOptionalPostalCodeField.valueBox must beEmpty
+            r.optionalPostalCodeField.get must beEmpty
+            r.mandatoryStringField.get must_== ""
+            r.legacyOptionalStringField.valueBox must beEmpty
+            r.optionalStringField.get must beEmpty
+            r.mandatoryTextareaField.get must_== ""
+            r.legacyOptionalTextareaField.valueBox must beEmpty
+            r.optionalTextareaField.get must beEmpty
+            // r.mandatoryTimeZoneField.get must_== "America/Chicago"
+            r.legacyOptionalTimeZoneField.valueBox must beEmpty
+            r.optionalTimeZoneField.get must beEmpty
         }
       }
     }
 
     "reset dirty flags on save" in {
-      val fttr = FieldTypeTestRecord.createRecord.save
+      val fttr = FieldTypeTestRecord.createRecord.save()
       fttr.mandatoryDecimalField(BigDecimal("3.14"))
-      fttr.dirtyFields.length must_== 1
-      fttr.save
-      fttr.dirtyFields.length must_== 0
+      fttr.dirty_? must_== true
+      fttr.save()
+      fttr.dirty_? must_== false
     }
 
     "update dirty fields for a FieldTypeTestRecord" in {
@@ -693,7 +702,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         val fttr = FieldTypeTestRecord.createRecord
           .legacyOptionalStringField("legacy optional string")
           .optionalStringField("optional string")
-          .save
+          .save()
 
         fttr.mandatoryBooleanField(true)
         fttr.mandatoryBooleanField.dirty_? must_== true
@@ -722,18 +731,18 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         fttr.legacyOptionalStringField(Empty)
         fttr.legacyOptionalStringField.dirty_? must_== true
 
-        fttr.dirtyFields.length must_== 9
+        fttr.dirty_? must_== true
         fttr.update
-        fttr.dirtyFields.length must_== 0
+        fttr.dirty_? must_== false
 
-        val fromDb = FieldTypeTestRecord.find(fttr.id.is)
+        val fromDb = FieldTypeTestRecord.find(fttr.id.get)
         fromDb.isDefined must_== true
         fromDb foreach { rec =>
           rec must_== fttr
-          rec.dirtyFields.length must_== 0
+          rec.dirty_? must_== false
         }
 
-        val fttr2 = FieldTypeTestRecord.createRecord.save
+        val fttr2 = FieldTypeTestRecord.createRecord.save()
 
         fttr2.legacyOptionalStringField("legacy optional string")
         fttr2.legacyOptionalStringField.dirty_? must_== true
@@ -741,15 +750,15 @@ class MongoRecordSpec extends Specification with MongoTestKit {
         fttr2.optionalStringField("optional string")
         fttr2.optionalStringField.dirty_? must_== true
 
-        fttr2.dirtyFields.length must_== 2
+        fttr2.dirty_? must_== true
         fttr2.update
-        fttr2.dirtyFields.length must_== 0
+        fttr2.dirty_? must_== false
 
-        val fromDb2 = FieldTypeTestRecord.find(fttr2.id.is)
-        fromDb2.isDefined must_== true
-        fromDb2.toList map { rec =>
-          rec must_== fttr2
-          rec.dirtyFields.length must_== 0
+        val fromDb2 = FieldTypeTestRecord.find(fttr2.id.get)
+        fromDb2 must beLike {
+          case Full(rec) =>
+            rec must_== fttr2
+            rec.dirty_? must_== false
         }
       }
     }
@@ -758,7 +767,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       val mfttr = MongoFieldTypeTestRecord.createRecord
         .legacyOptionalDateField(new Date)
         .legacyOptionalObjectIdField(ObjectId.get)
-        .save
+        .save()
 
       Thread.sleep(100) // sleep so dates will be different
 
@@ -780,18 +789,18 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       mfttr.legacyOptionalObjectIdField(Empty)
       mfttr.legacyOptionalObjectIdField.dirty_? must_== true
 
-      mfttr.dirtyFields.length must_== 6
+      mfttr.dirty_? must_== true
       mfttr.update
-      mfttr.dirtyFields.length must_== 0
+      mfttr.dirty_? must_== false
 
-      val fromDb = MongoFieldTypeTestRecord.find(mfttr.id.is)
+      val fromDb = MongoFieldTypeTestRecord.find(mfttr.id.get)
       fromDb.isDefined must_== true
       fromDb foreach { rec =>
         rec must_== mfttr
-        rec.dirtyFields.length must_== 0
+        rec.dirty_? must_== false
       }
 
-      val mfttr2 = MongoFieldTypeTestRecord.createRecord.save
+      val mfttr2 = MongoFieldTypeTestRecord.createRecord.save()
 
       mfttr2.legacyOptionalDateField(new Date)
       mfttr2.legacyOptionalDateField.dirty_? must_== true
@@ -799,39 +808,38 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       mfttr2.legacyOptionalObjectIdField(ObjectId.get)
       mfttr2.legacyOptionalObjectIdField.dirty_? must_== true
 
-      mfttr2.dirtyFields.length must_== 2
+      mfttr2.dirty_? must_== true
       mfttr2.update
-      mfttr2.dirtyFields.length must_== 0
+      mfttr2.dirty_? must_== false
 
-      val fromDb2 = MongoFieldTypeTestRecord.find(mfttr2.id.is)
-      fromDb2.isDefined must_== true
-      fromDb2.toList map { rec =>
-        rec must_== mfttr2
-        rec.dirtyFields.length must_== 0
+      val fromDb2 = MongoFieldTypeTestRecord.find(mfttr2.id.get)
+      fromDb2 must beLike {
+        case Full(rec) =>
+          rec must_== mfttr2
+          rec.dirty_? must_== false
       }
     }
 
     "update dirty fields for a PatternFieldTestRecord" in {
-      val pftrd = PatternFieldTestRecord.createRecord.save
+      val pftrd = PatternFieldTestRecord.createRecord.save()
 
       pftrd.mandatoryPatternField(Pattern.compile("^Mon", Pattern.CASE_INSENSITIVE))
       pftrd.mandatoryPatternField.dirty_? must_== true
 
-      pftrd.dirtyFields.length must_== 1
+      pftrd.dirty_? must_== true
       pftrd.update
-      pftrd.dirtyFields.length must_== 0
+      pftrd.dirty_? must_== false
 
-      val fromDb = PatternFieldTestRecord.find(pftrd.id.is)
-      fromDb.isDefined must_== true
-      fromDb foreach { rec =>
-        rec must_== pftrd
-        rec.dirtyFields.length must_== 0
+      val fromDb = PatternFieldTestRecord.find(pftrd.id.get)
+      fromDb must beLike {
+        case Full(rec) =>
+          rec must_== pftrd
+          rec.dirty_? must_== false
       }
-      success
     }
 
     "update dirty fields for a ListTestRecord" in {
-      val ltr = ListTestRecord.createRecord.save
+      val ltr = ListTestRecord.createRecord.save()
 
       ltr.mandatoryStringListField(List("abc", "def", "ghi"))
       ltr.mandatoryStringListField.dirty_? must_== true
@@ -845,20 +853,20 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       ltr.mongoCaseClassListField(List(MongoCaseClassTestObject(1,"str",MyTestEnum.TWO)))
       ltr.mongoCaseClassListField.dirty_? must_== true
 
-      ltr.dirtyFields.length must_== 4
+      ltr.dirty_? must_== true
       ltr.update
-      ltr.dirtyFields.length must_== 0
+      ltr.dirty_? must_== false
 
-      val fromDb = ListTestRecord.find(ltr.id.is)
-      fromDb.isDefined must_== true
-      fromDb.toList map { rec =>
-        rec must_== ltr
-        rec.dirtyFields.length must_== 0
+      val fromDb = ListTestRecord.find(ltr.id.get)
+      fromDb must beLike {
+        case Full(rec) =>
+          rec must_== ltr
+          rec.dirty_? must_== false
       }
     }
 
     "update dirty fields for a MapTestRecord" in {
-      val mtr = MapTestRecord.save
+      val mtr = MapTestRecord.save()
 
       mtr.mandatoryStringMapField(Map("a" -> "abc", "b" -> "def", "c" -> "ghi"))
       mtr.mandatoryStringMapField.dirty_? must_== true
@@ -866,15 +874,15 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       mtr.mandatoryIntMapField(Map("a" -> 4, "b" -> 5, "c" -> 6))
       mtr.mandatoryIntMapField.dirty_? must_== true
 
-      mtr.dirtyFields.length must_== 2
+      mtr.dirty_? must_== true
       mtr.update
-      mtr.dirtyFields.length must_== 0
+      mtr.dirty_? must_== false
 
-      val fromDb = MapTestRecord.find(mtr.id.is)
-      fromDb.isDefined must_== true
-      fromDb.toList map { rec =>
-        rec must_== mtr
-        rec.dirtyFields.length must_== 0
+      val fromDb = MapTestRecord.find(mtr.id.get)
+      fromDb must beLike {
+        case Full(rec) =>
+          rec must_== mtr
+          rec.dirty_? must_== false
       }
     }
 
@@ -892,7 +900,7 @@ class MongoRecordSpec extends Specification with MongoTestKit {
 
       val srtr = SubRecordTestRecord.createRecord
         .mandatoryBsonRecordField(sr1)
-        .save
+        .save()
 
       val sr2 = sr1.copy.name("SubRecord2")
 
@@ -902,17 +910,26 @@ class MongoRecordSpec extends Specification with MongoTestKit {
       srtr.mandatoryBsonRecordListField(List(sr1,sr2))
       srtr.mandatoryBsonRecordListField.dirty_? must_== true
 
-      srtr.dirtyFields.length must_== 2
+      srtr.dirty_? must_== true
       srtr.update
-      srtr.dirtyFields.length must_== 0
+      srtr.dirty_? must_== false
 
-      val fromDb = SubRecordTestRecord.find(srtr.id.is)
-      fromDb.isDefined must_== true
-      fromDb.toList map { rec =>
-        rec must_== srtr
-        rec.dirtyFields.length must_== 0
+      val fromDb = SubRecordTestRecord.find(srtr.id.get)
+      fromDb must beLike {
+        case Full(rec) =>
+          rec must_== srtr
+          rec.dirty_? must_== false
+      }
+    }
+
+    "support custom field name" in {
+      RecordRules.fieldName.doWith((_, name) => snakify(name)) {
+        val rec = CustomFieldName.createRecord
+        rec.customField.name must_== "custom_field"
+        rec.save()
+
+        CustomFieldName.find(rec.id.get) must_== Full(rec)
       }
     }
   }
 }
-

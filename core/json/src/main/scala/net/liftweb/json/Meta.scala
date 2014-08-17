@@ -17,6 +17,13 @@
 package net.liftweb
 package json
 
+// FIXME Needed to due to https://issues.scala-lang.org/browse/SI-6541,
+// which causes existential types to be inferred for the generated
+// unapply of a case class with a wildcard parameterized type.
+// Ostensibly should be fixed in 2.12, which means we're a ways away
+// from being able to remove this, though.
+import scala.language.existentials
+
 import java.lang.reflect.{Constructor => JConstructor, Field, Type, ParameterizedType, GenericArrayType}
 import java.util.Date
 import java.sql.Timestamp
@@ -93,7 +100,7 @@ private[json] object Meta {
                              (implicit formats: Formats): Mapping = {
     import Reflection._
 
-    def constructors(t: Type, visited: Set[Type], context: Option[Context]) = {
+    def constructors(t: Type, visited: Set[Type], context: Option[Context]): List[DeclaredConstructor] = {
       Reflection.constructors(t, formats.parameterNameReader, context).map { case (c, args) =>
         DeclaredConstructor(c, args.map { case (name, t) =>
           toArg(unmangleName(name), t, visited, Context(name, c.getDeclaringClass, args)) })
@@ -220,8 +227,8 @@ private[json] object Meta {
       classOf[java.lang.Short], classOf[Date], classOf[Timestamp], classOf[Symbol], classOf[JValue],
       classOf[JObject], classOf[JArray]).map((_, ())))
 
-    private val primaryConstructors = new Memo[Class[_], List[(String, Type)]]
-    private val declaredFields = new Memo[(Class[_], String), Boolean]
+    private val primaryConstructorArgumentsMemo = new Memo[Class[_], List[(String, Type)]]
+    private val declaredFieldsMemo = new Memo[Class[_], Map[String,Field]]
 
     def constructors(t: Type, names: ParameterNameReader, context: Option[Context]): List[(JConstructor[_], List[(String, Type)])] =
       rawClassOf(t).getDeclaredConstructors.map(c => (c, constructorArgs(t, c, names, context))).toList
@@ -229,7 +236,7 @@ private[json] object Meta {
     def constructorArgs(t: Type, constructor: JConstructor[_], 
                         nameReader: ParameterNameReader, context: Option[Context]): List[(String, Type)] = {
       def argsInfo(c: JConstructor[_], typeArgs: Map[TypeVariable[_], Type]) = {
-        val Name = """^((?:[^$]|[$][^0-9]+)+)([$][0-9]+)?$"""r
+        val Name = """^((?:[^$]|[$][^0-9]+)+)([$][0-9]+)?$""".r
         def clean(name: String) = name match {
           case Name(text, junk) => text
         }
@@ -266,7 +273,7 @@ private[json] object Meta {
         constructorArgs(c, primary, formats.parameterNameReader, None)
       }
 
-      primaryConstructors.memoize(c, findMostComprehensive(_))
+      primaryConstructorArgumentsMemo.memoize(c, findMostComprehensive(_))
     }
 
     def typeParameters(t: Type, k: Kind, context: Context): List[Class[_]] = {
@@ -355,17 +362,11 @@ private[json] object Meta {
         else findField(clazz.getSuperclass, name)
     }
 
-    def hasDeclaredField(clazz: Class[_], name: String): Boolean = {
-      def declaredField = try {
-        clazz.getDeclaredField(name)
-        true
-      } catch {
-        case e: NoSuchFieldException => false
-      }
-
-      declaredFields.memoize((clazz, name), _ => declaredField)
+    def getDeclaredFields(clazz: Class[_]) : Map[String,Field] = {
+      def extractDeclaredFields = clazz.getDeclaredFields.map(field => (field.getName, field)).toMap
+      declaredFieldsMemo.memoize(clazz, _ => extractDeclaredFields)
     }
-
+    
     def mkJavaArray(x: Any, componentType: Class[_]) = {
       val arr = x.asInstanceOf[scala.Array[_]]
       val a = java.lang.reflect.Array.newInstance(componentType, arr.size)

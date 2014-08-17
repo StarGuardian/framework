@@ -112,6 +112,22 @@ trait JsObj extends JsExp {
       def props = np
     }
   }
+
+  /**
+    * Overwrites any existing keys and adds the rest.
+    */
+  def extend(other: JsObj) = {
+    // existing, non-existing props
+    val (ep, nep) = other.props.partition { case (key, exp) => props.exists { case (k, e) => k == key }}
+    // replaced props
+    val rp = props.map { case (key, exp) =>
+      ep.find { case (k, e) => k == key }.getOrElse(key -> exp)
+    }
+
+    new JsObj {
+      def props = rp ::: nep
+    }
+  }
 }
 
 /**
@@ -159,13 +175,6 @@ trait JsExp extends HtmlFixer with ToJsCmd {
 
   override def toString = "JsExp("+toJsCmd+")"
 
-  // def label: String = "#JS"
-
-  /*
-  override def buildString(sb: StringBuilder) = {
-    (new Text(toJsCmd)).buildString(sb)
-  }*/
-
   def appendToParent(parentName: String): JsCmd = {
     val ran = "v" + Helpers.nextFuncName
     JsCmds.JsCrVar(ran, this) &
@@ -183,14 +192,6 @@ trait JsExp extends HtmlFixer with ToJsCmd {
 
 
   def ~>(right: Box[JsMember]): JsExp = right.dmap(this)(r => ~>(r))
-
-  /**
-   * This exists for backward compatibility reasons for JQueryLeft and JQueryRight
-   * which are now deprecated. Use ~> whenever possible as this will be removed soon.
-   */
-  @deprecated("Use `~>` instead", "2.3")
-  def >>(right: JsMember): JsExp = ~>(right)
-
 
   def cmd: JsCmd = JsCmds.Run(toJsCmd + ";")
 
@@ -261,9 +262,9 @@ object JE {
   /**
    * gets the element by ID
    */
-  case class ElemById(id: String, then: String*) extends JsExp {
+  case class ElemById(id: String, thenStr: String*) extends JsExp {
     override def toJsCmd = "document.getElementById(" + id.encJs + ")" + (
-      if (then.isEmpty) "" else then.mkString(".", ".", "")
+      if (thenStr.isEmpty) "" else thenStr.mkString(".", ".", "")
     )
   }
 
@@ -548,25 +549,6 @@ object JE {
 }
 
 trait HtmlFixer {
-  /**
-   * Super important... call fixHtml at instance creation time and only once
-   * This method must be run in the context of the thing creating the XHTML
-   * to capture the bound functions
-   */
-  @deprecated("Use fixHtmlAndJs or fixHtmlFunc", "2.4")
-  protected def fixHtml(uid: String, content: NodeSeq): String = {
-    val w = new java.io.StringWriter
-
-    S.htmlProperties.
-    htmlWriter(Group(S.session.
-                     map(s =>
-                       s.fixHtml(s.processSurroundAndInclude("JS SetHTML id: "
-                                                             + uid,
-                                                             content))).
-                     openOr(content)),
-               w)
-    w.toString.encJs
-  }
 
   /**
    * Calls fixHtmlAndJs and if there's embedded script tags,
@@ -668,8 +650,7 @@ object JsCmds {
 """)}</script>
 
     private def fixEndScriptTag(in: String): String =
-    if (S.ieMode) """\<\/script\>""".r.replaceAllIn(in, """<\\/script>""")
-    else in
+    """\<\/script\>""".r.replaceAllIn(in, """<\\/script>""")
   }
 
   def JsHideId(what: String): JsCmd = LiftRules.jsArtifacts.hide(what).cmd
@@ -781,9 +762,9 @@ object JsCmds {
    * Assigns the value of 'right' to the members of the element
    * having this 'id', chained by 'then' sequences
    */
-  case class SetElemById(id: String, right: JsExp, then: String*) extends JsCmd {
+  case class SetElemById(id: String, right: JsExp, thenStr: String*) extends JsCmd {
     def toJsCmd = "if (document.getElementById(" + id.encJs + ")) {document.getElementById(" + id.encJs + ")" + (
-      if (then.isEmpty) "" else then.mkString(".", ".", "")
+      if (thenStr.isEmpty) "" else thenStr.mkString(".", ".", "")
     ) + " = " + right.toJsCmd + ";};"
   }
 
@@ -844,6 +825,17 @@ object JsCmds {
 
   case class JsTry(what: JsCmd, alert: Boolean) extends JsCmd {
     def toJsCmd = "try { " + what.toJsCmd + " } catch (e) {" + (if (alert) "alert(e);" else "") + "}"
+  }
+
+  /**
+   * JsSchedule the execution of the JsCmd using setTimeout()
+   * @param what the code to execute
+   */
+  case class JsSchedule(what: JsCmd) extends JsCmd {
+    def toJsCmd = s"""setTimeout(function()
+    {
+      ${what.toJsCmd}
+    } , 0);"""
   }
 
   /**
@@ -962,13 +954,13 @@ object JsRules {
   * messages.
   */
   //@deprecated
-  @volatile var prefadeDuration: Helpers.TimeSpan = 5 seconds
+  @volatile var prefadeDuration: Helpers.TimeSpan = 5.seconds
 
   /**
   * The default fade time for fading FadeOut and FadeIn
   * messages.
   */
   //@deprecated
-  @volatile var fadeTime: Helpers.TimeSpan = 1 second
+  @volatile var fadeTime: Helpers.TimeSpan = 1.second
 }
 

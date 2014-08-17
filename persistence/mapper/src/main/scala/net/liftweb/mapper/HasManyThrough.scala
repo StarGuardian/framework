@@ -17,7 +17,7 @@
 package net.liftweb
 package mapper
 
-import collection.mutable.HashSet
+import scala.collection.mutable.HashSet
 import util.FatLazy
 import common._
 
@@ -78,7 +78,7 @@ class HasManyThrough[From <: KeyedMapper[ThroughType, From],
     val newKeys = new HashSet[ThroughType];
 
     theSetList.foreach(i => newKeys += i)
-    val toDelete = current.filter(c => !newKeys.contains(throughToField.actualField(c).is))
+    val toDelete = current.filter(c => !newKeys.contains(throughToField.actualField(c).get))
     toDelete.foreach(_.delete_!)
 
     val oldKeys = new HashSet[ThroughType];

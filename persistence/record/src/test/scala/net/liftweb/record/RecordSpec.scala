@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2012 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,36 +21,31 @@ import java.util.Calendar
 
 import org.specs2.mutable.Specification
 import org.specs2.specification.Fragment
+import org.joda.time._
 
-import util.Helpers._
-import json.JsonAST.JField
-import json.JsonAST.JInt
-import json.JsonAST.JString
-import http.js.JE.Str
-import json.JsonAST.JObject
-import json.JsonAST.JDouble
-import json.JsonAST.JBool
-
-import json.JsonAST._
-import util._
 import http.js.JE._
-import field.Countries
-
-import fixtures._
+import common._
 import http.{S, LiftSession}
-import common.Empty
+import json._
+import util._
+import util.Helpers._
+
+import field.Countries
+import fixtures._
+
+import JsonDSL._
 
 
 /**
  * Systems under specification for Record.
  */
-object RecordSpec extends Specification  {
+object RecordSpec extends Specification {
   "Record Specification".title
 
   "Record field introspection" should {
     val rec = FieldTypeTestRecord.createRecord
     val allExpectedFieldNames: List[String] = (for {
-      typeName <- "Binary Boolean Country DateTime Decimal Double Email Enum Int Locale Long PostalCode String Textarea TimeZone".split(" ")
+      typeName <- "Binary Boolean Country DateTime Decimal Double Email Enum Int Locale Long PostalCode String Textarea TimeZone JodaTime".split(" ")
       flavor <- "mandatory legacyOptional optional".split(" ")
     } yield flavor + typeName + "Field").toList
 
@@ -59,15 +54,18 @@ object RecordSpec extends Specification  {
     }
 
     "correctly look up fields by name" in {
-      for (name <- allExpectedFieldNames) yield {
-        rec.fieldByName(name).isDefined must_== true
-      }
+      val fields = allExpectedFieldNames.flatMap(rec.fieldByName _)
+
+      fields.length must_== allExpectedFieldNames.length
     }
 
     "not look up fields by bogus names" in {
-      for (name <- allExpectedFieldNames) yield {
-        rec.fieldByName("x" + name + "y").isDefined must_== false
-      }
+      val fields =
+        allExpectedFieldNames.flatMap { name =>
+          rec.fieldByName("x" + name + "y")
+        }
+
+      fields.length must_== 0
     }
 
     "ignore synthetic methods" in {
@@ -178,6 +176,7 @@ object RecordSpec extends Specification  {
     S.initIfUninitted(session){
       val gu: Array[Byte] = Array(18, 19, 20)
       val cal = Calendar.getInstance
+      val dt: DateTime = DateTime.now
 
       val fttr = FieldTypeTestRecord.createRecord
         .mandatoryBinaryField(gu)
@@ -195,56 +194,77 @@ object RecordSpec extends Specification  {
         .mandatoryStringField("foobar")
         .mandatoryTextareaField("foobar")
         .mandatoryTimeZoneField("America/Chicago")
+        .mandatoryJodaTimeField(dt)
 
+      val fttrJValue: JValue =
+        ("mandatoryBooleanField" -> false) ~
+        ("mandatoryCountryField" -> 1) ~
+        ("mandatoryDateTimeField" -> Helpers.toInternetDate(cal.getTime)) ~
+        ("mandatoryDecimalField" -> "3.14") ~
+        ("mandatoryDoubleField" -> 1999.0) ~
+        ("mandatoryEmailField" -> "test@liftweb.net") ~
+        ("mandatoryEnumField" -> 0) ~
+        ("mandatoryIntField" -> 99) ~
+        ("mandatoryLocaleField" -> "en_US") ~
+        ("mandatoryLongField" -> 100) ~
+        ("mandatoryPostalCodeField" -> "55401") ~
+        ("mandatoryStringField" -> "foobar") ~
+        ("mandatoryTextareaField" -> "foobar") ~
+        ("mandatoryTimeZoneField" -> "America/Chicago") ~
+        ("mandatoryBinaryField" -> "EhMU") ~
+        ("mandatoryJodaTimeField" -> dt.getMillis)
 
-      val json = "{\"mandatoryBooleanField\": false, \"mandatoryCountryField\": 1, \"mandatoryDateTimeField\": \""+Helpers.toInternetDate(cal.getTime)+"\",\"mandatoryDecimalField\": \"3.14\", \"mandatoryDoubleField\": 1999.0,\"mandatoryEmailField\":\"test@liftweb.net\",\"mandatoryEnumField\":0,\"mandatoryIntField\":99,\"mandatoryLocaleField\":\"en_US\",\"mandatoryLongField\":100,\"mandatoryPostalCodeField\":\"55401\",\"mandatoryStringField\":\"foobar\",\"mandatoryTextareaField\":\"foobar\",\"mandatoryTimeZoneField\":\"America/Chicago\",\"mandatoryBinaryField\":\"EhMU\"}"
+      val fttrJson: String = compact(render(fttrJValue))
 
       val fttrAsJsObj = JsObj(
         ("mandatoryBooleanField", JsFalse),
+        ("mandatoryCountryField", Str(Countries.USA.toString)),
+        ("mandatoryDateTimeField", Str(Helpers.toInternetDate(cal.getTime))),
+        ("mandatoryDecimalField", Num(3.14)),
+        ("mandatoryDoubleField", Num(1999.0)),
+        ("mandatoryEmailField", Str("test@liftweb.net")),
+        ("mandatoryEnumField", Str(MyTestEnum.ONE.toString)),
+        ("mandatoryIntField", Num(99)),
+        ("mandatoryLocaleField", Str("en_US")),
+        ("mandatoryLongField", Num(100)),
+        ("mandatoryPostalCodeField", Str("55401")),
+        ("mandatoryStringField", Str("foobar")),
+        ("mandatoryTextareaField", Str("foobar")),
+        ("mandatoryTimeZoneField", Str("America/Chicago")),
+        ("mandatoryBinaryField", Str("121314")),
+        ("mandatoryJodaTimeField", Num(dt.getMillis)),
         ("legacyOptionalBooleanField", JsNull),
         ("optionalBooleanField", JsNull),
-        ("mandatoryCountryField", Str(Countries.USA.toString)),
         ("legacyOptionalCountryField", JsNull),
         ("optionalCountryField", JsNull),
-        ("mandatoryDateTimeField", Str(Helpers.toInternetDate(cal.getTime))),
         ("legacyOptionalDateTimeField", JsNull),
         ("optionalDateTimeField", JsNull),
-        ("mandatoryDecimalField", Num(3.14)),
         ("legacyOptionalDecimalField", JsNull),
         ("optionalDecimalField", JsNull),
-        ("mandatoryDoubleField", Num(1999.0)),
         ("legacyOptionalDoubleField", JsNull),
         ("optionalDoubleField", JsNull),
-        ("mandatoryEmailField", Str("test@liftweb.net")),
         ("legacyOptionalEmailField", JsNull),
         ("optionalEmailField", JsNull),
-        ("mandatoryEnumField", Str(MyTestEnum.ONE.toString)),
         ("legacyOptionalEnumField", JsNull),
         ("optionalEnumField", JsNull),
-        ("mandatoryIntField", Num(99)),
         ("legacyOptionalIntField", JsNull),
         ("optionalIntField", JsNull),
-        ("mandatoryLocaleField", Str("en_US")),
         ("legacyOptionalLocaleField", JsNull),
         ("optionalLocaleField", JsNull),
-        ("mandatoryLongField", Num(100)),
         ("legacyOptionalLongField", JsNull),
         ("optionalLongField", JsNull),
-        ("mandatoryPostalCodeField", Str("55401")),
         ("legacyOptionalPostalCodeField", JsNull),
         ("optionalPostalCodeField", JsNull),
-        ("mandatoryStringField", Str("foobar")),
         ("legacyOptionalStringField", JsNull),
         ("optionalStringField", JsNull),
-        ("mandatoryTextareaField", Str("foobar")),
         ("legacyOptionalTextareaField", JsNull),
         ("optionalTextareaField", JsNull),
-        ("mandatoryTimeZoneField", Str("America/Chicago")),
         ("legacyOptionalTimeZoneField", JsNull),
         ("optionalTimeZoneField", JsNull),
         ("optionalBinaryField", JsNull),
         ("legacyOptionalBinaryField", JsNull),
-        ("mandatoryBinaryField", Str("121314"))
+        ("legacyOptionalJodaTimeField", JsNull),
+        ("optionalJodaTimeField", JsNull)
       )
 
       "convert to JsExp (via asJSON)" in {
@@ -304,23 +324,18 @@ object RecordSpec extends Specification  {
           JField("optionalTimeZoneField", JNothing),
           JField("mandatoryBinaryField", JString("EhMU")),
           JField("legacyOptionalBinaryField", JNothing),
-          JField("optionalBinaryField", JNothing)
+          JField("optionalBinaryField", JNothing),
+          JField("mandatoryJodaTimeField", JInt(dt.getMillis)),
+          JField("legacyOptionalJodaTimeField", JNothing),
+          JField("optionalJodaTimeField", JNothing)
         ))
       }
 
       "get set from json string using lift-json parser" in {
-        val fttrFromJson = FieldTypeTestRecord.fromJsonString(json)
-        fttrFromJson.isDefined must_== true
-        fttrFromJson.toList map { r =>
-          r mustEqual fttr
-        }
-      }
+        S.initIfUninitted(new LiftSession("", randomString(20), Empty)) {
+          val fttrFromJson = FieldTypeTestRecord.fromJsonString(fttrJson)
 
-      "get set from json string using util.JSONParser" in {
-        val fttrFromJSON = FieldTypeTestRecord.fromJSON(json)
-        fttrFromJSON.isDefined must_== true
-        fttrFromJSON.toList map { r =>
-          r mustEqual fttr
+          fttrFromJson must_== Full(fttr)
         }
       }
     }
@@ -328,7 +343,7 @@ object RecordSpec extends Specification  {
 
   "basic record" should {
     "order fields according to fieldOrder" in {
-      BasicTestRecord.metaFields must_==  List(BasicTestRecord.field2, BasicTestRecord.field1, BasicTestRecord.field3)
+      BasicTestRecord.metaFields must_==  List(BasicTestRecord.field2, BasicTestRecord.field1, BasicTestRecord.fieldThree)
     }
   }
 }

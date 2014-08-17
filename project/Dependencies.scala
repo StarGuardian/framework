@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 WorldWide Conferencing, LLC
+ * Copyright 2011-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,15 +23,9 @@ object Dependencies {
 
   type ModuleMap = String => ModuleID
 
-  lazy val CVMapping2911 = crossMapped("2.9.1-1" -> "2.9.1")
-  lazy val CVMapping29   = crossMapped("2.10.0" -> "2.10", "2.9.1-1" -> "2.9.2", "2.9.1" -> "2.9.2")
-  lazy val CVMappingAll  = crossMapped("2.10.0" -> "2.10", "2.9.2" -> "2.9.1", "2.9.1-1" -> "2.9.1")
+  lazy val CVMappingAll  = crossMapped("2.11.2" -> "2.11")
 
   lazy val slf4jVersion = "1.7.2"
-
-  lazy val scalazGroup       = defaultOrMapped("org.scalaz")
-  lazy val scalazVersion     = defaultOrMapped("6.0.4", "2.9.0" -> "6.0.RC2")
-  lazy val scalaz7Version    = defaultOrMapped("7.0.0-M9")
 
   // Compile scope:
   // Scope available in all classpath, transitive by default.
@@ -42,20 +36,20 @@ object Dependencies {
   lazy val joda_time              = "joda-time"                  % "joda-time"          % "2.1"
   lazy val joda_convert           = "org.joda"                   % "joda-convert"       % "1.2"
   lazy val htmlparser             = "nu.validator.htmlparser"    % "htmlparser"         % "1.4"
-  lazy val mongo_java_driver      = "org.mongodb"                % "mongo-java-driver"  % "2.10.1"
+  lazy val mongo_java_driver      = "org.mongodb"                % "mongo-java-driver"  % "2.12.2"
   lazy val paranamer              = "com.thoughtworks.paranamer" % "paranamer"          % "2.4.1"
-  lazy val scalajpa               = "org.scala-libs"             % "scalajpa"           % "1.4"     cross CVMapping29
+  lazy val scalajpa               = "org.scala-libs"             % "scalajpa"           % "1.5"     cross CVMappingAll
   lazy val scalap: ModuleMap      = "org.scala-lang"             % "scalap"             % _
   lazy val scala_compiler: ModuleMap = "org.scala-lang"          % "scala-compiler"     % _
-  lazy val scalaz_core: ModuleMap = sv => scalazGroup(sv)        % "scalaz-core"        % scalazVersion(sv) cross crossMapped("2.10.0" -> "2.10.0-RC5", "2.9.2" -> "2.9.1", "2.9.1-1" -> "2.9.1")
-  lazy val scalaz7_core: ModuleMap = sv => scalazGroup(sv)       % "scalaz-core"        % scalaz7Version(sv) cross CVMapping29
+  lazy val scalaz7_core           = "org.scalaz"                 % "scalaz-core"        % "7.0.6"   cross CVMappingAll
+  lazy val squeryl                = "org.squeryl"                % "squeryl"            % "0.9.5-7" cross CVMappingAll
   lazy val slf4j_api              = "org.slf4j"                  % "slf4j-api"          % slf4jVersion
-  lazy val squeryl                = "org.squeryl"                % "squeryl"            % "0.9.5-6" cross CVMapping29
-  @deprecated lazy val scalaactors= "org.scala-lang"             % "scala-actors"       % "2.10.0"
+  lazy val scala_xml              = "org.scala-lang.modules"     %% "scala-xml"         % "1.0.1"
+  lazy val rhino                  = "org.mozilla"                % "rhino"              % "1.7R4"
+  lazy val scala_parser           = "org.scala-lang.modules"     %% "scala-parser-combinators" % "1.0.1"
 
   // Aliases
   lazy val mongo_driver = mongo_java_driver
-  lazy val scalaz = scalaz_core
   lazy val scalaz7 = scalaz7_core
 
 
@@ -80,12 +74,13 @@ object Dependencies {
   // Test scope:
   // Scope available only in test classpath, non-transitive by default.
   // TODO: See if something alternative with lesser footprint can be used instead of mega heavy apacheds
-  lazy val apacheds    = "org.apache.directory.server" % "apacheds-server-integ"    % "1.5.5"      % "test" // TODO: 1.5.7
-  lazy val jetty6      = "org.mortbay.jetty"           % "jetty"                    % "6.1.26"     % "test"
-  lazy val jwebunit    = "net.sourceforge.jwebunit"    % "jwebunit-htmlunit-plugin" % "2.5"        % "test"
-  lazy val mockito_all = "org.mockito"                 % "mockito-all"              % "1.9.0"      % "test"
-  lazy val scalacheck  = "org.scalacheck"             %% "scalacheck"               % "1.10.0"     % "test"
-  lazy val specs2: ModuleMap =
-                         "org.specs2"                 %% "specs2"                   % defaultOrMapped("1.12.3")(_) % "test"
+  lazy val apacheds    = "org.apache.directory.server" % "apacheds-server-integ"    % "1.5.5"   % "test" // TODO: 1.5.7
+  lazy val jetty6      = "org.mortbay.jetty"           % "jetty"                    % "6.1.26"  % "test"
+  lazy val jwebunit    = "net.sourceforge.jwebunit"    % "jwebunit-htmlunit-plugin" % "2.5"     % "test"
+  lazy val mockito_all = "org.mockito"                 % "mockito-all"              % "1.9.0"   % "test"
+  lazy val scalacheck  = "org.scalacheck"             %% "scalacheck"               % "1.10.1"  % "test"
+  lazy val specs2      = "org.specs2"                 %% "specs2"                   % "2.3.11"  % "test"
+  lazy val scalatest   = "org.scalatest"              %% "scalatest"                % "2.1.3"   % "test"
+  lazy val junit       = "junit"                       % "junit"                    % "4.8.2"   % "test"
 
 }

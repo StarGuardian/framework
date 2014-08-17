@@ -20,6 +20,7 @@ package rest
 
 
 import net.liftweb._
+import actor.LAFuture
 import json._
 import common._
 import util._
@@ -305,6 +306,20 @@ trait RestHelper extends LiftRules.DispatchPF {
   }
 
   /**
+   * An extractor that tests the request to see if it's an OPTIONS and
+   * if it is, the path and the request are extracted.  It can
+   * be used as:<br/>
+   * <pre>case "api" :: id :: _ Options req => ...</pre><br/>
+   * or<br/>
+   * <pre>case Options("api" :: id :: _, req) => ...</pre><br/>   *
+   */
+  protected object Options {
+    def unapply(r: Req): Option[(List[String], Req)] =
+      if (r.requestType.options_?) Some(r.path.partPath -> r) else None
+
+  }
+
+  /**
    * A function that chooses JSON or XML based on the request..
    * Use with serveType
    */
@@ -520,6 +535,37 @@ trait RestHelper extends LiftRules.DispatchPF {
   protected implicit def thingToResp[T](in: T)(implicit c: T => LiftResponse):
   () => Box[LiftResponse] = () => Full(c(in))
 
+
+  /**
+   * If we're returning a future, then automatically turn the request into an Async request
+   * @param in the LAFuture of the response type
+   * @param c the implicit conversion from T to LiftResponse
+   * @tparam T the type
+   * @return Nothing
+   */
+  protected implicit def futureToResponse[T](in: LAFuture[T])(implicit c: T => LiftResponse):
+  () => Box[LiftResponse] = () => {
+    RestContinuation.async(reply => {
+      in.foreach(t => reply.apply(c(t)))
+    })
+  }
+
+  /**
+   * If we're returning a future, then automatically turn the request into an Async request
+   * @param in the LAFuture of the response type
+   * @param c the implicit conversion from T to LiftResponse
+   * @tparam T the type
+   * @return Nothing
+   */
+  protected implicit def futureBoxToResponse[T](in: LAFuture[Box[T]])(implicit c: T => LiftResponse):
+  () => Box[LiftResponse] = () => {
+    RestContinuation.async(reply => {
+      in.foreach(t => reply.apply{
+        boxToResp(t).apply() openOr NotFoundResponse()
+      })
+    })
+  }
+
   /**
    * Turn a Box[T] into the return type expected by
    * DispatchPF.  Note that this method will return
@@ -659,19 +705,11 @@ trait RestHelper extends LiftRules.DispatchPF {
     original match {
       case JObject(fields) => 
         toMerge match {
-          case jf: JField => JObject(replace(fields, jf))
           case JObject(otherFields) =>
             JObject(otherFields.foldLeft(fields)(replace(_, _)))
           case _ => original
         }
 
-      case jf: JField => 
-        toMerge match {
-          case jfMerge: JField => JObject(replace(List(jf), jfMerge))
-          case JObject(otherFields) =>
-            JObject(otherFields.foldLeft(List(jf))(replace(_, _)))
-          case _ => original
-        }
       case _ => original // can't merge
     }
   }

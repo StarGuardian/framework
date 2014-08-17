@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2012 WorldWide Conferencing, LLC
+ * Copyright 2010-2014 WorldWide Conferencing, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ package enumnamefieldspecs {
   }
   object JsonObj extends JsonObjectMeta[JsonObj]
 
-  class EnumNameRec extends MongoRecord[EnumNameRec] with MongoId[EnumNameRec] {
+  class EnumNameRec extends MongoRecord[EnumNameRec] with ObjectIdPk[EnumNameRec] {
     def meta = EnumNameRec
 
     object dow extends EnumNameField(this, WeekDay)
@@ -51,7 +51,7 @@ package enumnamefieldspecs {
 
     override def equals(other: Any): Boolean = other match {
       case that: EnumNameRec =>
-        this.id == that.id &&
+        this.id.get == that.id.get &&
         this.dow.value == that.dow.value &&
         this.dowOptional.valueBox == that.dowOptional.valueBox &&
         this.jsonobj.value == that.jsonobj.value
@@ -78,15 +78,15 @@ object EnumNameFieldSpec extends Specification with MongoTestKit {
     "work with default values" in {
       checkMongoIsRunning
 
-      val er = EnumNameRec.createRecord.save
+      val er = EnumNameRec.createRecord.save()
 
-      val erFromDb = EnumNameRec.find(er.id)
-      erFromDb.isDefined must_== true
-      erFromDb.toList map { er2 =>
-        er2 mustEqual er
-        er2.dow.value mustEqual WeekDay.Mon
-        er2.dowOptional.valueBox mustEqual Empty
-        er2.jsonobj.value mustEqual JsonObj(WeekDay.Mon)
+      val erFromDb = EnumNameRec.find(er.id.get)
+      erFromDb must beLike {
+        case Full(er2) =>
+          er2 mustEqual er
+          er2.dow.value mustEqual WeekDay.Mon
+          er2.dowOptional.valueBox mustEqual Empty
+          er2.jsonobj.value mustEqual JsonObj(WeekDay.Mon)
       }
     }
 
@@ -96,14 +96,14 @@ object EnumNameFieldSpec extends Specification with MongoTestKit {
       val er = EnumNameRec.createRecord
         .dow(WeekDay.Tue)
         .jsonobj(JsonObj(WeekDay.Sun))
-        .save
+        .save()
 
-      val erFromDb = EnumNameRec.find(er.id)
-      erFromDb.isDefined must_== true
-      erFromDb.toList map { er2 =>
-        er2 mustEqual er
-        er2.dow.value mustEqual WeekDay.Tue
-        er2.jsonobj.value mustEqual JsonObj(WeekDay.Sun)
+      val erFromDb = EnumNameRec.find(er.id.get)
+      erFromDb must beLike {
+        case Full(er2) =>
+          er2 mustEqual er
+          er2.dow.value mustEqual WeekDay.Tue
+          er2.jsonobj.value mustEqual JsonObj(WeekDay.Sun)
       }
     }
 
@@ -112,13 +112,13 @@ object EnumNameFieldSpec extends Specification with MongoTestKit {
 
       val er = EnumNameRec.createRecord
       er.dowOptional.setBox(Empty)
-      er.save
+      er.save()
 
-      val erFromDb = EnumNameRec.find(er.id)
-      erFromDb.isDefined must_== true
-      erFromDb.toList map { er2 =>
-        er2 mustEqual er
-        er2.dowOptional.valueBox mustEqual Empty
+      val erFromDb = EnumNameRec.find(er.id.get)
+      erFromDb must beLike {
+        case Full(er2) =>
+          er2 mustEqual er
+          er2.dowOptional.valueBox mustEqual Empty
       }
     }
 
@@ -127,13 +127,13 @@ object EnumNameFieldSpec extends Specification with MongoTestKit {
 
       val er = EnumNameRec.createRecord
       er.dowOptional.setBox(Full(WeekDay.Sat))
-      er.save
+      er.save()
 
-      val erFromDb = EnumNameRec.find(er.id)
-      erFromDb.isDefined must_== true
-      erFromDb.toList map { er2 =>
-        er2 mustEqual er
-        er2.dowOptional.valueBox mustEqual Full(WeekDay.Sat)
+      val erFromDb = EnumNameRec.find(er.id.get)
+      erFromDb must beLike {
+        case Full(er2) =>
+          er2 mustEqual er
+          er2.dowOptional.valueBox mustEqual Full(WeekDay.Sat)
       }
     }
   }

@@ -137,3 +137,87 @@ Taylor Leese
 
 ### Email: ###
 tleese22 at gmail dot com
+
+### Name: ###
+Jon Hoffman
+
+### Email: ###
+jonhoffman at gmail dot com
+
+### Name: ###
+Will Palmeri
+
+### Email: ###
+wpalmeri at gmail dot com
+
+### Name: ###
+Austen Holmes
+
+### Email: ###
+austen dot holmes at gmail dot com
+
+### Name: ###
+Jon Hoffman
+
+### Email: ###
+jonhoffman at gmail dot com
+
+###Name: ###
+Will Palmeri
+
+### Email: ###
+wpalmeri at gmail dot com
+
+### Name: ###
+David Barri
+
+### Email: ###
+japgolly @@ gmail .. com
+
+### Name: ###
+Viktor Hedefalk
+
+### Email: ###
+hedefalk @@ gmail .. com
+
+### Name: ###
+Kenji Yoshida
+
+### Email: ###
+6b656e6a69 at gmail dot com
+
+### Name: ###
+Christopher Webster
+
+### Email: ###
+cwebster93 at gmail .. com
+
+### Name: ###
+Donald McLean
+
+### Email: ###
+dmclean62 @@ gmail .. com
+
+### Name: ###
+Vasya Novikov
+
+### Email: ###
+n1dr+cm3053lift@yaaandex.com (replace "aaa" with "a")
+
+### Name: ###
+Robert Freytag
+
+### Email: ###
+robertfreytag+lift at gmail .. com
+
+### Name: ###
+Mikhail Limansky
+
+### Email: ###
+mike.limansky at gmail dot com
+
+### Name: ###
+Aleksey Izmailov
+
+### Email: ###
+izmailoff at gmail dot com

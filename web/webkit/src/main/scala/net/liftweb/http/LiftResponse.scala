@@ -18,12 +18,12 @@ package net.liftweb
 package http
 
 import net.liftweb.common._
-import scala.xml.{Node, Group, NodeSeq}
+import scala.xml.Node
 import net.liftweb.util._
 import net.liftweb.http.provider._
 import js._
 import net.liftweb.util.Helpers._
-import net.liftweb.json.{JsonAST, Printer}
+import net.liftweb.json.JsonAST
 import java.io.{OutputStream, OutputStreamWriter, Writer, ByteArrayOutputStream}
 
 /**
@@ -55,6 +55,29 @@ case class CreatedResponse(xml: Node, mime: String, addlHeaders: List[(String, S
 
   def out = xml
 }
+
+/**
+ * 201 Created Response
+ *
+ * The Json Resource was created. We then return the resource, post-processing, to
+ * the client. Usually used with HTTP PUT.
+ */
+object CreatedResponse {
+
+  lazy val jsonPrinter: scala.text.Document => String =
+    LiftRules.jsonOutputConverter.vend
+
+  def apply(json: JsonAST.JValue, addlHeaders: List[(String, String)]): LiftResponse = {
+    val headers: List[(String, String)] = S.getResponseHeaders( Nil ) ++  addlHeaders
+
+    new JsonResponse(new JsExp {
+      lazy val toJsCmd = jsonPrinter(JsonAST.render(json))
+    }, headers, Nil, 201)
+  }
+
+}
+
+
 
 /**
  * 202 response but without body.
@@ -94,8 +117,10 @@ case class UnauthorizedResponse(realm: String) extends LiftResponse {
   def toResponse = InMemoryResponse(Array(), List("WWW-Authenticate" -> ("Basic realm=\"" + realm + "\"")), Nil, 401)
 }
 
-object Qop extends Enumeration(0, "auth", "auth-int", "auth,auth-int") {
-  val AUTH, AUTH_INT, AUTH_AND_AUTH_INT = Value
+object Qop extends Enumeration {
+  val AUTH = Value("auth")
+  val AUTH_INT = Value("auth-int")
+  val AUTH_AND_AUTH_INT = Value("auth,auth-int")
 }
 
 /**
@@ -399,7 +424,7 @@ object RedirectResponse {
 case class RedirectResponse(uri: String, request: Req, cookies: HTTPCookie*) extends LiftResponse {
   // The Location URI is not resolved here, instead it is resolved with context path prior of sending the actual response
   def toResponse = InMemoryResponse(Array(), List("Location" -> uri,
-    "Content-Type" -> "text/plain"), cookies toList, 302)
+    "Content-Type" -> "text/plain"), cookies.toList, 302)
 }
 
 
@@ -421,7 +446,7 @@ object SeeOtherResponse {
 case class SeeOtherResponse(uri: String, request: Req, cookies: HTTPCookie*) extends LiftResponse {
   // The Location URI is not resolved here, instead it is resolved with context path prior of sending the actual response
   def toResponse = InMemoryResponse(Array(), List("Location" -> uri,
-    "Content-Type" -> "text/plain"), cookies toList, 303)
+    "Content-Type" -> "text/plain"), cookies.toList, 303)
 }
 
 object DoRedirectResponse {
@@ -476,28 +501,6 @@ object DocType {
 
   val html5 = "<!DOCTYPE html>"
 }
-
-/**
- * Avoid using this in favor of LiftRules.docType
- *
- */
-@deprecated("Avoid using this in favor of LiftRules.docType", "2.3")
-object ResponseInfo {
-
-   def docType: PartialFunction[Req, Box[String]] = new PartialFunction[Req, Box[String]](){
-     def isDefinedAt(req: Req): Boolean  = true
-
-     def apply(req: Req): Box[String] = LiftRules.docType.vend(req)
-   }
-
-   def docType_=(f: PartialFunction[Req, Box[String]]) = LiftRules.docType.default.set { (req: Req) => 
-     if (f.isDefinedAt(req))
-       f(req)
-     else
-       Full(DocType.xhtmlTransitional)
-   }
-}
-
 
 object PlainTextResponse {
   def apply(text: String): PlainTextResponse = PlainTextResponse(text, Nil, 200)
